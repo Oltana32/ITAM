@@ -1,0 +1,190 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  backend-tests:
+    name: Backend - Tests & Linting
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: asset_buddy_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          cd django-backend
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run migrations
+        run: |
+          cd django-backend
+          python manage.py migrate
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings
+          USE_SQLITE: false
+          POSTGRES_DB: asset_buddy_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+
+      - name: Lint with flake8
+        run: |
+          cd django-backend
+          flake8 apps/ --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 apps/ --count --exit-zero --max-complexity=10 --max-line-length=100 --statistics
+
+      - name: Format check with black
+        run: |
+          cd django-backend
+          black --check apps/
+
+      - name: Import sorting with isort
+        run: |
+          cd django-backend
+          isort --check-only apps/
+
+      - name: Type checking with mypy
+        run: |
+          cd django-backend
+          mypy apps/ --ignore-missing-imports || true
+
+      - name: Security check with bandit
+        run: |
+          cd django-backend
+          bandit -r apps/ -ll || true
+
+      - name: Run tests with coverage
+        run: |
+          cd django-backend
+          pytest --cov=apps --cov-report=xml --cov-report=term-missing
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings
+          USE_SQLITE: false
+          POSTGRES_DB: asset_buddy_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./django-backend/coverage.xml
+          flags: backend
+          fail_ci_if_error: false
+
+  frontend-tests:
+    name: Frontend - Tests & Linting
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Lint with ESLint
+        run: |
+          cd frontend
+          npm run lint
+
+      - name: Format check with Prettier
+        run: |
+          cd frontend
+          npm run format:check
+
+      - name: Type check
+        run: |
+          cd frontend
+          npm run type-check
+
+      - name: Run tests
+        run: |
+          cd frontend
+          npm run test:coverage || true
+
+      - name: Build
+        run: |
+          cd frontend
+          npm run build
+
+  security:
+    name: Security Checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  docker-build:
+    name: Docker Build Check
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Build backend image
+        uses: docker/build-push-action@v4
+        with:
+          context: ./django-backend
+          push: false
+          tags: asset-buddy:backend-latest
+
+      - name: Build frontend image
+        uses: docker/build-push-action@v4
+        with:
+          context: ./frontend
+          push: false
+          tags: asset-buddy:frontend-latest

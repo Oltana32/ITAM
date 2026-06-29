@@ -1,0 +1,8 @@
+from django.apps import AppConfig
+
+
+class ManufacturersConfig(AppConfig):
+    default_auto_field = "django.db.models.BigAutoField"
+    name = "apps.manufacturers"
+    label = "manufacturers"
+    verbose_name = "Manufacturers"
