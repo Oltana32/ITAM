@@ -27,6 +27,8 @@ import {
   AuditSession,
 } from '@/hooks/useAudits';
 import { useLocations } from '@/hooks/useLocations';
+import { useDepartments } from '@/hooks/useDepartments';
+import { useUsers } from '@/hooks/useUsers';
 import { extractAssetTag } from '@/lib/parseQrScan';
 import { toast } from 'sonner';
 
@@ -37,6 +39,17 @@ const statusLabels: Record<string, string> = {
   cancelled: 'Cancelled',
 };
 
+const auditTypeOptions = [
+  { value: 'inventory', label: 'Inventory Audit', purpose: 'Verify that physical assets exist and match ITAM records' },
+  { value: 'asset_assignment', label: 'Asset Assignment Audit', purpose: 'Verify assets are assigned to the correct employee/department' },
+  { value: 'location', label: 'Location Audit', purpose: 'Verify assets are physically located where the system says they are' },
+  { value: 'condition', label: 'Condition Audit', purpose: 'Verify asset physical/operational condition' },
+  { value: 'compliance', label: 'Compliance Audit', purpose: 'Check whether assets meet company policies' },
+  { value: 'financial', label: 'Financial Audit', purpose: 'Verify asset cost, depreciation, and financial records' },
+  { value: 'security', label: 'Security Audit', purpose: 'Check security-related asset information' },
+  { value: 'full', label: 'Full IT Asset Audit', purpose: 'Comprehensive audit covering all of the above' },
+] as const;
+
 export default function Audits() {
   const { data: sessions = [], isLoading } = useAuditSessions();
   const { locations } = useLocations();
@@ -46,11 +59,15 @@ export default function Audits() {
   const [createOpen, setCreateOpen] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [form, setForm] = useState({
-    title: '',
-    department: '',
+    departmentId: 'none',
+    departmentFree: '',
     locationId: 'all',
     planned_date: format(new Date(), 'yyyy-MM-dd'),
+    audit_type: 'inventory',
+    lead_auditor: 'none',
   });
+  const { departments } = useDepartments();
+  const { users } = useUsers();
 
   const activeSession = useMemo(
     () => sessions.find((s) => s.id === activeSessionId) ?? null,
@@ -63,36 +80,31 @@ export default function Audits() {
   );
 
   const handleCreate = async () => {
-    if (!form.title.trim()) {
-      toast.error('Audit name is required');
-      return;
+    const deptVal = form.departmentId && form.departmentId !== 'none'
+      ? (form.departmentId.startsWith('name:') ? form.departmentId.replace(/^name:/, '') : Number(form.departmentId))
+      : (form.departmentFree.trim() || undefined);
+
+    const selectedAuditType = auditTypeOptions.find((option) => option.value === form.audit_type) ?? auditTypeOptions[0];
+
+    try {
+      const created = await createSession.mutateAsync({
+        title: selectedAuditType.label,
+        department: deptVal,
+        location: form.locationId && form.locationId !== 'all' ? Number(form.locationId) : null,
+        status: 'planned',
+        planned_date: form.planned_date,
+        audit_type: form.audit_type,
+        lead_auditor: form.lead_auditor && form.lead_auditor !== 'none' ? Number(form.lead_auditor) : undefined,
+      });
+      setActiveSessionId(created.id);
+      setCreateOpen(false);
+      setForm({ departmentId: 'none', departmentFree: '', locationId: 'all', planned_date: format(new Date(), 'yyyy-MM-dd'), audit_type: 'inventory', lead_auditor: 'none' });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to create audit session');
     }
-    const created = await createSession.mutateAsync({
-      title: form.title.trim(),
-      department: form.department.trim(),
-      location: form.locationId && form.locationId !== 'all' ? Number(form.locationId) : null,
-      status: 'planned',
-      planned_date: form.planned_date,
-    });
-    setActiveSessionId(created.id);
-    setCreateOpen(false);
-    setForm({ title: '', department: '', locationId: 'all', planned_date: format(new Date(), 'yyyy-MM-dd') });
   };
 
-  const handleScan = async (raw: string) => {
-    if (!activeSessionId || activeSession?.status !== 'in_progress') {
-      toast.error('Start an audit session before scanning');
-      return;
-    }
-    const assetTag = extractAssetTag(raw);
-    try {
-      await scanAsset.mutateAsync({ sessionId: activeSessionId, assetTag });
-      toast.success(`Verified: ${assetTag}`);
-      void refetchResults();
-    } catch (err) {
-      toast.warning(err instanceof Error ? err.message : 'Scan failed');
-    }
-  };
+  
 
   const handleExport = async (fmt: 'xlsx' | 'pdf') => {
     if (!activeSessionId) return;
@@ -138,12 +150,37 @@ export default function Audits() {
                 </DialogHeader>
                 <div className="grid gap-4 py-2">
                   <div className="grid gap-2">
-                    <Label>Audit Name</Label>
-                    <Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Q2 2026 HQ Audit" />
+                    <Label>Audit Type</Label>
+                    <Select value={form.audit_type} onValueChange={(v) => setForm({ ...form, audit_type: v })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {auditTypeOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            <div className="flex flex-col items-start">
+                              <span>{option.label}</span>
+                              <span className="text-[11px] text-muted-foreground">{option.purpose}</span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="grid gap-2">
                     <Label>Department</Label>
-                    <Input value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} placeholder="IT, Finance, Operations…" />
+                    <Select value={form.departmentId} onValueChange={(v) => setForm({ ...form, departmentId: v })}>
+                      <SelectTrigger><SelectValue placeholder="Choose department (or enter free-text)" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">(No department)</SelectItem>
+                        {departments.map((d, i) => (
+                          <SelectItem key={(d.id ?? d.name) + String(i)} value={String(d.id ?? `name:${d.name}`)}>{d.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      value={form.departmentFree}
+                      onChange={(e) => setForm({ ...form, departmentFree: e.target.value })}
+                      placeholder="Or enter a department name"
+                    />
                   </div>
                   <div className="grid gap-2">
                     <Label>Location</Label>
@@ -158,13 +195,25 @@ export default function Audits() {
                     </Select>
                   </div>
                   <div className="grid gap-2">
+                    <Label>Lead Auditor</Label>
+                    <Select value={form.lead_auditor} onValueChange={(v) => setForm({ ...form, lead_auditor: v })}>
+                      <SelectTrigger><SelectValue placeholder="Optional: select lead auditor" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">(None)</SelectItem>
+                        {users.map((u) => (
+                          <SelectItem key={u.id} value={String(u.id)}>{u.first_name ? `${u.first_name} ${u.last_name}` : u.email}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-2">
                     <Label>Planned Date</Label>
                     <Input type="date" value={form.planned_date} onChange={(e) => setForm({ ...form, planned_date: e.target.value })} />
                   </div>
                 </div>
-                <DialogFooter>
+                  <DialogFooter>
                   <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button>
-                  <Button onClick={handleCreate} disabled={createSession.isPending}>Create</Button>
+                  <Button onClick={handleCreate} disabled={createSession.isLoading}>Create</Button>
                 </DialogFooter>
               </DialogContent>
             </Dialog>
@@ -205,6 +254,7 @@ export default function Audits() {
             {/* Session actions */}
             <div className="flex flex-wrap gap-2 items-center">
               <Badge variant="outline">{activeSession.location_name || 'All locations'}</Badge>
+              {activeSession.audit_id && <Badge variant="outline">ID: {activeSession.audit_id}</Badge>}
               {activeSession.department && <Badge variant="outline">Dept: {activeSession.department}</Badge>}
               {activeSession.status === 'planned' && (
                 <Button size="sm" onClick={() => startSession.mutate(activeSession.id)} disabled={startSession.isPending}>
@@ -358,7 +408,22 @@ export default function Audits() {
       <QrScannerDialog
         open={scannerOpen}
         onOpenChange={setScannerOpen}
-        onScan={handleScan}
+        onVerify={async (payload) => {
+          if (!activeSessionId) return;
+          try {
+            await scanAsset.mutateAsync({
+              sessionId: activeSessionId,
+              asset_tag: payload.asset_tag,
+              verification: payload.verification,
+              current_condition: payload.current_condition,
+              notes: payload.notes,
+            });
+            toast.success(`Verified: ${payload.asset_tag}`);
+            void refetchResults();
+          } catch (err) {
+            toast.warning(err instanceof Error ? err.message : 'Scan failed');
+          }
+        }}
         continuous
       />
     </AppLayout>

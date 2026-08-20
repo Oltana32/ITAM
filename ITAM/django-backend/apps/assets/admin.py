@@ -16,6 +16,7 @@ class AssetAdmin(admin.ModelAdmin):
 class AssetStatusHistoryAdmin(admin.ModelAdmin):
     list_display = (
         "asset",
+        "asset_tag",
         "change_type",
         "field_name",
         "old_value",

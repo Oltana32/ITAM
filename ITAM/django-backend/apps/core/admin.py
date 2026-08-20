@@ -4,7 +4,7 @@ Provides admin interface for viewing audit logs.
 """
 
 from django.contrib import admin
-from .models import AuditLog
+from .models import AuditLog, Department
 
 
 @admin.register(AuditLog)
@@ -42,3 +42,10 @@ class AuditLogAdmin(admin.ModelAdmin):
     def has_change_permission(self, request, obj=None):
         """Prevent editing of audit logs."""
         return False
+
+
+@admin.register(Department)
+class DepartmentAdmin(admin.ModelAdmin):
+    list_display = ("name", "code")
+    search_fields = ("name", "code")
+    ordering = ("name",)

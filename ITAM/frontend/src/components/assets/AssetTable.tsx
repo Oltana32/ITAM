@@ -83,6 +83,7 @@ export function AssetTable({
 
   return (
     <div className="rounded-lg border bg-card overflow-hidden animate-fade-in">
+      <div className="hidden md:block">
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent bg-muted/50">
@@ -193,6 +194,68 @@ export function AssetTable({
           )}
         </TableBody>
       </Table>
+      </div>
+      <div className="divide-y md:hidden">
+        {sorted.length === 0 ? (
+          <div className="p-8 text-center text-muted-foreground">No assets found</div>
+        ) : (
+          sorted.map((asset) => (
+            <div key={asset.id} className={`p-4 transition-colors ${selectedIds.includes(asset.id) ? 'bg-primary/5' : 'bg-card'}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  {onSelectionChange && (
+                    <Checkbox
+                      checked={selectedIds.includes(asset.id)}
+                      onCheckedChange={() => toggleOne(asset.id)}
+                      aria-label={`Select ${asset.name}`}
+                      className="mt-1"
+                    />
+                  )}
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-muted to-muted/50 ring-1 ring-border/50">
+                    <CategoryIcon category={asset.category} className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                </div>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+                    <Button variant="ghost" size="icon" className="h-8 w-8">
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-40">
+                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onView?.(asset); }}>
+                      <Eye className="mr-2 h-4 w-4" />View Details
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onEdit?.(asset); }}>
+                      <Edit className="mr-2 h-4 w-4" />Edit
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onShowQr?.(asset); }}>
+                      <QrCode className="mr-2 h-4 w-4" />QR Code
+                    </DropdownMenuItem>
+                    {canDelete && (
+                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onDelete?.(asset); }} className="text-destructive focus:text-destructive">
+                        <Trash2 className="mr-2 h-4 w-4" />Delete
+                      </DropdownMenuItem>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+              <button type="button" className="mt-3 w-full text-left" onClick={() => onView?.(asset)}>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="font-medium">{asset.name}</p>
+                  <StatusBadge status={asset.status} />
+                </div>
+                <p className="mt-1 text-sm text-muted-foreground font-mono">{asset.assetTag}</p>
+                <div className="mt-2 space-y-1 text-sm text-muted-foreground">
+                  <p><span className="font-medium text-foreground">Serial:</span> {asset.serialNumber || '—'}</p>
+                  <p><span className="font-medium text-foreground">Category:</span> {categoryLabels[asset.category]}</p>
+                  <p><span className="font-medium text-foreground">Assigned To:</span> {asset.assignedTo || '—'}</p>
+                  <p><span className="font-medium text-foreground">Location:</span> {asset.location}</p>
+                </div>
+              </button>
+            </div>
+          ))
+        )}
+      </div>
     </div>
   );
 }

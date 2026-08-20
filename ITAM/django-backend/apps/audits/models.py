@@ -57,10 +57,53 @@ class AuditSession(models.Model):
         blank=True,
         help_text="Limit audit to specific asset category (optional)"
     )
-    department = models.CharField(
-        max_length=255,
+    # Department now references a registered Department model
+    department = models.ForeignKey(
+        "core.Department",
+        null=True,
         blank=True,
+        on_delete=models.SET_NULL,
         help_text="Limit audit to a specific department (optional)"
+    )
+
+    # Audit identifier and type
+    audit_id = models.CharField(max_length=32, unique=True, db_index=True, editable=False, null=True, blank=True)
+
+    class AuditType(models.TextChoices):
+        INVENTORY = "inventory", "Inventory Audit"
+        ASSET_ASSIGNMENT = "asset_assignment", "Asset Assignment Audit"
+        LOCATION = "location", "Location Audit"
+        CONDITION = "condition", "Condition Audit"
+        COMPLIANCE = "compliance", "Compliance Audit"
+        FINANCIAL = "financial", "Financial Audit"
+        SECURITY = "security", "Security Audit"
+        FULL = "full", "Full IT Asset Audit"
+
+    PURPOSES = {
+        "inventory": "Verify that physical assets exist and match ITAM records",
+        "asset_assignment": "Verify assets are assigned to the correct employee/department",
+        "location": "Verify assets are physically located where the system says they are",
+        "condition": "Verify asset physical/operational condition",
+        "compliance": "Check whether assets meet company policies",
+        "financial": "Verify asset cost, depreciation, and financial records",
+        "security": "Check security-related asset information",
+        "full": "Comprehensive audit covering all of the above",
+    }
+
+    audit_type = models.CharField(
+        max_length=32,
+        choices=AuditType.choices,
+        default=AuditType.FULL,
+        help_text="Type of audit"
+    )
+
+    lead_auditor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        related_name="lead_audits",
+        on_delete=models.SET_NULL,
+        help_text="Primary auditor/owner of this session"
     )
     
     # Summary
@@ -83,7 +126,59 @@ class AuditSession(models.Model):
         verbose_name_plural = "Audit Sessions"
     
     def __str__(self) -> str:
-        return f"{self.title} ({self.audit_date or self.planned_date})"
+        return f"{getattr(self, 'audit_id', '')} — {self.title} ({self.audit_date or self.planned_date})"
+
+    @classmethod
+    def get_type_title(cls, audit_type):
+        return dict(cls.AuditType.choices).get(audit_type, "Audit Session")
+
+    @classmethod
+    def get_audit_type_purpose(cls, audit_type):
+        return cls.PURPOSES.get(audit_type, "Audit covering the selected asset scope")
+
+    def save(self, *args, **kwargs):
+        """Auto-generate the title and audit_id for standard audit types."""
+        self.title = self.get_type_title(self.audit_type) or "Audit Session"
+
+        base_title = self.title.strip()
+        if self.pk:
+            duplicate_exists = (
+                AuditSession.objects.filter(title__iexact=base_title)
+                .exclude(pk=self.pk)
+                .exists()
+            )
+        else:
+            duplicate_exists = AuditSession.objects.filter(title__iexact=base_title).exists()
+
+        if duplicate_exists:
+            seq = 2
+            candidate = f"{base_title} {seq}"
+            while AuditSession.objects.filter(title__iexact=candidate).exclude(pk=self.pk).exists():
+                seq += 1
+                candidate = f"{base_title} {seq}"
+            self.title = candidate
+
+        if not self.audit_id:
+            year = (self.audit_date or self.planned_date or now().date()).year
+            prefix = f"AUD-{year}-"
+            # Find the highest existing sequence for the year
+            last = (
+                AuditSession.objects.filter(audit_id__startswith=prefix)
+                .order_by("-audit_id")
+                .first()
+            )
+            if last and last.audit_id:
+                try:
+                    last_seq = int(last.audit_id.rsplit("-", 1)[-1])
+                except Exception:
+                    last_seq = AuditSession.objects.filter(audit_date__year=year).count()
+                seq = last_seq + 1
+            else:
+                seq = AuditSession.objects.filter(audit_date__year=year).count() + 1
+
+            self.audit_id = f"{prefix}{seq:04d}"
+
+        super().save(*args, **kwargs)
     
     def calculate_variance(self):
         """Calculate audit variance (missing vs found)."""
@@ -147,10 +242,13 @@ class AuditFinding(models.Model):
         blank=True,
         choices=[
             ("excellent", "Excellent"),
+            ("excellent", "Excellent"),
             ("good", "Good"),
             ("fair", "Fair"),
             ("poor", "Poor"),
             ("damaged", "Damaged"),
+            ("missing_parts", "Missing Parts"),
+            ("not_functional", "Not Functional"),
         ],
         help_text="Condition observed during audit"
     )
@@ -167,6 +265,8 @@ class AuditFinding(models.Model):
     
     # Photos/evidence
     evidence_notes = models.TextField(blank=True, help_text="Evidence or photo descriptions")
+    # Structured verification checks (tag/serial/location/user match booleans)
+    verification = models.JSONField(default=dict, blank=True, help_text="Verification checklist (tag_match, serial_match, assigned_user_correct, location_correct)")
     
     class Meta:
         ordering = ["-verified_at"]
@@ -180,6 +280,24 @@ class AuditFinding(models.Model):
     
     def __str__(self) -> str:
         return f"{self.asset.tag} - {self.get_status_display()} ({self.audit_session.title})"
+
+    @property
+    def result_status(self) -> str:
+        """Map internal finding status to user-facing audit result types."""
+        if self.status == AuditFinding.Status.FOUND:
+            return "Verified"
+        if self.status == AuditFinding.Status.NOT_FOUND:
+            return "Not Found"
+        if self.status == AuditFinding.Status.DAMAGED:
+            return "Damaged"
+        if self.status in (
+            AuditFinding.Status.CONDITION_ISSUE,
+            AuditFinding.Status.LOCATION_MISMATCH,
+            AuditFinding.Status.OWNERSHIP_MISMATCH,
+            AuditFinding.Status.OTHER,
+        ):
+            return "Mismatch"
+        return "Not Audited"
 
 
 class VarianceReport(models.Model):

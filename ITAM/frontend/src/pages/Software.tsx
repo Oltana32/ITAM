@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Input } from '@/components/ui/input';
-import { ExpiryAlerts } from '@/components/alerts/ExpiryAlerts';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -21,10 +20,14 @@ interface SoftwareLicense {
   id: string;
   name: string;
   vendor: string;
+  vendorDisplay: string;
   totalLicenses: number;
   usedLicenses: number;
+  activeUsers: number;
   expiryDate: string;
   cost: number;
+  currency: string;
+  perSeatCost: number;
   status: string;
   category: string;
   notes?: string;
@@ -35,7 +38,9 @@ interface LicenseFormData {
   vendor: string;
   category: string;
   totalLicenses: number;
+  activeUsers: number;
   cost: number;
+  currency?: string;
   expiryDate: string;
   notes: string;
 }
@@ -43,25 +48,37 @@ interface LicenseFormData {
 function normalizeSoftwareLicense(raw: any): SoftwareLicense {
   const expiryDate = raw.expiry_date || '';
   const daysUntilExpiry = expiryDate ? Math.ceil((new Date(expiryDate).getTime() - Date.now()) / 86400000) : Infinity;
-  const status = expiryDate
+  const inferredStatus = raw.status || (expiryDate
     ? daysUntilExpiry < 0
       ? 'expired'
       : daysUntilExpiry < 60
       ? 'warning'
       : 'active'
-    : 'active';
+    : 'active');
+
+  const totalSeats = Number(raw.seats ?? 0) || 0;
+  const usedSeats = Number(raw.active_users ?? raw.used_seats ?? raw.allocated_seats ?? 0) || 0;
+  const totalAnnualCost = Number(raw.total_annual_cost ?? raw.annual_cost ?? 0) || 0;
+  const costPerSeat = Number(raw.cost_per_seat ?? (totalSeats > 0 ? totalAnnualCost / totalSeats : 0)) || 0;
+
+  const vendorCode = raw.vendor || 'other';
+  const vendorDisplay = raw.vendor_display || vendorCode;
 
   return {
     id: String(raw.id),
     name: raw.software_name || 'Untitled',
-    vendor: raw.vendor || 'other',
-    totalLicenses: Number(raw.seats) || 0,
-    usedLicenses: 0,
+    vendor: vendorCode,
+    vendorDisplay,
+    totalLicenses: totalSeats,
+    usedLicenses: usedSeats,
+    activeUsers: usedSeats,
     expiryDate,
-    cost: 0,
-    status,
-    category: raw.notes ? 'Software' : 'Software',
+    cost: totalAnnualCost,
+    currency: raw.cost_currency || 'USD',
+    status: inferredStatus,
+    category: vendorDisplay || 'Software',
     notes: raw.notes || '',
+    perSeatCost: costPerSeat,
   };
 }
 
@@ -82,8 +99,13 @@ export default function Software() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [licenses, setLicenses] = useState<SoftwareLicense[]>([]);
   const [open, setOpen] = useState(false);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [revokeOpen, setRevokeOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState<LicenseFormData>({ name: '', vendor: '', key: '', category: 'Productivity', totalLicenses: 10, cost: 0, expiryDate: '', notes: '' });
+  const [selectedLicense, setSelectedLicense] = useState<SoftwareLicense | null>(null);
+  const [form, setForm] = useState<LicenseFormData>({ name: '', vendor: '', category: 'Productivity', totalLicenses: 10, activeUsers: 0, cost: 0, currency: 'USD', expiryDate: '', notes: '' });
+  const [editForm, setEditForm] = useState<LicenseFormData>({ name: '', vendor: '', category: 'Productivity', totalLicenses: 10, activeUsers: 0, cost: 0, currency: 'USD', expiryDate: '', notes: '' });
 
   useEffect(() => {
     void loadLicenses();
@@ -95,7 +117,8 @@ export default function Software() {
     return matchesSearch && matchesStatus;
   });
 
-  const totalCost = licenses.reduce((s, l) => s + l.cost, 0);
+  // Total annual spend = sum of (seats * annual_cost)
+  const totalCost = licenses.reduce((s, l) => s + (Number(l.cost) || 0), 0);
   const totalUsed = licenses.reduce((s, l) => s + l.usedLicenses, 0);
   const totalAvailable = licenses.reduce((s, l) => s + l.totalLicenses, 0);
   const activeCount = licenses.filter(l => l.status === 'active').length;
@@ -134,8 +157,11 @@ export default function Software() {
           software_name: form.name,
           vendor: form.vendor,
           seats: Number(form.totalLicenses) || 1,
+          active_users: Number(form.activeUsers) || 0,
           expiry_date: form.expiryDate || null,
           notes: form.notes || '',
+          annual_cost: Number(form.cost) || 0,
+          cost_currency: form.currency || 'USD',
         }),
       });
       if (!response.ok) {
@@ -146,10 +172,92 @@ export default function Software() {
       const created = normalizeSoftwareLicense(await response.json());
       setLicenses((prev) => [created, ...prev]);
       toast.success(`${created.name} license added`);
-      setForm({ name: '', vendor: '', category: 'Productivity', totalLicenses: 10, cost: 0, expiryDate: '', notes: '' });
+      setForm({ name: '', vendor: '', category: 'Productivity', totalLicenses: 10, activeUsers: 0, cost: 0, expiryDate: '', notes: '' });
       setOpen(false);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to add license');
+    }
+  };
+
+  const openLicenseDetails = (license: SoftwareLicense) => {
+    setSelectedLicense(license);
+    setDetailOpen(true);
+  };
+
+  const openLicenseEdit = (license: SoftwareLicense) => {
+    setSelectedLicense(license);
+    setEditForm({
+      name: license.name,
+      vendor: license.vendor,
+      category: license.category,
+      totalLicenses: license.totalLicenses,
+      activeUsers: license.activeUsers ?? license.usedLicenses,
+      cost: license.cost,
+      currency: license.currency || 'USD',
+      expiryDate: license.expiryDate,
+      notes: license.notes ?? '',
+    });
+    setEditOpen(true);
+  };
+
+  const handleEditLicense = async () => {
+    if (!selectedLicense || !editForm.name.trim() || !editForm.vendor.trim()) {
+      toast.error('Software name and vendor are required');
+      return;
+    }
+
+    try {
+      const response = await authFetch(`${API_BASE}${selectedLicense.id}/`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          software_name: editForm.name,
+          vendor: editForm.vendor,
+          seats: Number(editForm.totalLicenses) || 1,
+          active_users: Number(editForm.activeUsers) || 0,
+          expiry_date: editForm.expiryDate || null,
+          notes: editForm.notes || '',
+          annual_cost: Number(editForm.cost) || 0,
+          cost_currency: editForm.currency || 'USD',
+        }),
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        const message = payload.detail || payload.error || response.statusText || 'Failed to update license';
+        throw new Error(message);
+      }
+
+      const updated = normalizeSoftwareLicense(await response.json());
+      setLicenses((prev) => prev.map((item) => item.id === updated.id ? updated : item));
+      toast.success(`${updated.name} license updated`);
+      setEditOpen(false);
+      setSelectedLicense(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to update license');
+    }
+  };
+
+  const handleRevokeLicense = async () => {
+    if (!selectedLicense) return;
+
+    try {
+      const response = await authFetch(`${API_BASE}${selectedLicense.id}/`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        const message = payload.detail || payload.error || response.statusText || 'Failed to revoke license';
+        throw new Error(message);
+      }
+
+      setLicenses((prev) => prev.filter((item) => item.id !== selectedLicense.id));
+      toast.success(`${selectedLicense.name} license revoked`);
+      setRevokeOpen(false);
+      setSelectedLicense(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to revoke license');
     }
   };
 
@@ -167,10 +275,15 @@ export default function Software() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" className="gap-2" onClick={() => void loadLicenses()}>
-              <RefreshCw className="h-3.5 w-3.5" />
-              Sync
-            </Button>
+            <div className="relative w-64">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search licenses..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 h-9"
+              />
+            </div>
             <Dialog open={open} onOpenChange={setOpen}>
               <DialogTrigger asChild>
                 <Button className="shadow-lg shadow-primary/20">
@@ -209,9 +322,23 @@ export default function Software() {
                       <Input id="s-seats" type="number" min={1} value={form.totalLicenses} onChange={(e) => setForm({ ...form, totalLicenses: Number(e.target.value) })} />
                     </div>
                     <div className="grid gap-2">
+                      <Label htmlFor="s-active-users">Active users</Label>
+                      <Input id="s-active-users" type="number" min={0} value={form.activeUsers} onChange={(e) => setForm({ ...form, activeUsers: Number(e.target.value) })} />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="grid gap-2">
                       <Label htmlFor="s-exp">Expiry date</Label>
                       <Input id="s-exp" type="date" value={form.expiryDate} onChange={(e) => setForm({ ...form, expiryDate: e.target.value })} />
                     </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="s-currency">Currency</Label>
+                      <Input id="s-currency" value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })} />
+                    </div>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="s-cost">Annual cost</Label>
+                    <Input id="s-cost" type="number" step="0.01" min={0} value={form.cost} onChange={(e) => setForm({ ...form, cost: Number(e.target.value) })} />
                   </div>
                   <div className="grid gap-2">
                     <Label htmlFor="s-notes">Notes</Label>
@@ -226,8 +353,6 @@ export default function Software() {
             </Dialog>
           </div>
         </div>
-
-        <ExpiryAlerts />
 
         {/* Stats Cards */}
         <div className="grid gap-4 md:grid-cols-4 animate-fade-in-up">
@@ -294,29 +419,18 @@ export default function Software() {
         </div>
 
         {/* Filters */}
-        <div className="flex items-center gap-3 animate-fade-in-up">
-          <div className="relative flex-1 max-w-sm">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search licenses..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9"
-            />
-          </div>
-          <div className="flex gap-1.5">
-            {['all', 'active', 'warning', 'expired'].map((s) => (
-              <Button
-                key={s}
-                variant={statusFilter === s ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setStatusFilter(s)}
-                className="capitalize text-xs"
-              >
-                {s === 'all' ? 'All' : statusLabels[s] || s}
-              </Button>
-            ))}
-          </div>
+        <div className="flex items-center justify-end gap-1.5 animate-fade-in-up">
+          {['all', 'active', 'warning', 'expired'].map((s) => (
+            <Button
+              key={s}
+              variant={statusFilter === s ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setStatusFilter(s)}
+              className="capitalize text-xs"
+            >
+              {s === 'all' ? 'All' : statusLabels[s] || s}
+            </Button>
+          ))}
         </div>
 
         {/* License List */}
@@ -348,12 +462,21 @@ export default function Software() {
                             {lic.category}
                           </Badge>
                         </div>
-                        <p className="text-xs text-muted-foreground mt-0.5">{lic.vendor} · Expires {new Date(lic.expiryDate).toLocaleDateString()} · ${lic.cost.toLocaleString()}/yr</p>
+                        {(() => {
+                          const expiryDisplay = lic.expiryDate ? new Date(lic.expiryDate).toLocaleDateString() : '—';
+                          const perSeat = lic.perSeatCost || 0;
+                          const totalForLicense = lic.cost || 0;
+                          return (
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              {lic.vendorDisplay || lic.vendor} · Expires {expiryDisplay} · ${perSeat.toLocaleString()}/seat · ${totalForLicense.toLocaleString()}/yr
+                            </p>
+                          );
+                        })()}
                       </div>
                     </div>
                     <div className="flex items-center gap-4">
                       <div className="text-right min-w-[100px]">
-                        <p className="text-sm font-semibold">{lic.usedLicenses} / {lic.totalLicenses}</p>
+                        <p className="text-sm font-semibold">{lic.activeUsers ?? lic.usedLicenses} / {lic.totalLicenses}</p>
                         <div className="flex items-center gap-2 mt-1">
                           <Progress value={utilization} className="h-1.5 w-20" />
                           <span className="text-[10px] text-muted-foreground">{utilization}%</span>
@@ -366,10 +489,9 @@ export default function Software() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem>View Details</DropdownMenuItem>
-                          <DropdownMenuItem>Edit License</DropdownMenuItem>
-                          <DropdownMenuItem>Manage Users</DropdownMenuItem>
-                          <DropdownMenuItem className="text-destructive">Revoke</DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => openLicenseDetails(lic)}>View Details</DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => openLicenseEdit(lic)}>Edit License</DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => { setSelectedLicense(lic); setRevokeOpen(true); }} className="text-destructive">Revoke</DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </div>
@@ -386,6 +508,126 @@ export default function Software() {
           </CardContent>
         </Card>
       </div>
+
+      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{selectedLicense?.name ?? 'License Details'}</DialogTitle>
+            <DialogDescription>License summary and assignment overview.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <p className="text-muted-foreground">Vendor</p>
+                <p className="font-medium">{selectedLicense?.vendorDisplay || selectedLicense?.vendor || '—'}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Status</p>
+                <p className="font-medium capitalize">{selectedLicense?.status ?? 'active'}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Total seats</p>
+                <p className="font-medium">{selectedLicense?.totalLicenses ?? 0}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Active users</p>
+                <p className="font-medium">{selectedLicense?.activeUsers ?? selectedLicense?.usedLicenses ?? 0}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Expiry date</p>
+                <p className="font-medium">{selectedLicense?.expiryDate ? new Date(selectedLicense.expiryDate).toLocaleDateString() : '—'}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Annual cost</p>
+                <p className="font-medium">${(selectedLicense?.cost ?? 0).toLocaleString()}</p>
+              </div>
+            </div>
+            <div>
+              <p className="text-muted-foreground text-sm">Notes</p>
+              <p className="mt-1 text-sm">{selectedLicense?.notes || 'No notes provided.'}</p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setDetailOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Edit License</DialogTitle>
+            <DialogDescription>Update software subscription details.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-2">
+                <Label htmlFor="edit-name">Software name</Label>
+                <Input id="edit-name" value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-vendor">Vendor</Label>
+                <Select value={editForm.vendor} onValueChange={(v) => setEditForm({ ...editForm, vendor: v })}>
+                  <SelectTrigger id="edit-vendor">
+                    <SelectValue placeholder="Select vendor" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {vendorOptions.map(vendor => (
+                      <SelectItem key={vendor} value={vendor.toLowerCase().replace(/\s+/g, '_')}>{vendor}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-2">
+                <Label htmlFor="edit-seats">Total seats</Label>
+                <Input id="edit-seats" type="number" min={1} value={editForm.totalLicenses} onChange={(e) => setEditForm({ ...editForm, totalLicenses: Number(e.target.value) })} />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-active-users">Active users</Label>
+                <Input id="edit-active-users" type="number" min={0} value={editForm.activeUsers} onChange={(e) => setEditForm({ ...editForm, activeUsers: Number(e.target.value) })} />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-2">
+                <Label htmlFor="edit-expiry">Expiry date</Label>
+                <Input id="edit-expiry" type="date" value={editForm.expiryDate} onChange={(e) => setEditForm({ ...editForm, expiryDate: e.target.value })} />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-cost">Annual cost</Label>
+                <Input id="edit-cost" type="number" step="0.01" min={0} value={editForm.cost} onChange={(e) => setEditForm({ ...editForm, cost: Number(e.target.value) })} />
+              </div>
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="edit-notes">Notes</Label>
+              <Input id="edit-notes" value={editForm.notes} onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
+            <Button onClick={() => void handleEditLicense()}>Save changes</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={revokeOpen} onOpenChange={setRevokeOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Revoke license</DialogTitle>
+            <DialogDescription>
+              This will remove {selectedLicense?.name ?? 'this license'} from the active list.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRevokeOpen(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => void handleRevokeLicense()}>Revoke</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppLayout>
   );
 }

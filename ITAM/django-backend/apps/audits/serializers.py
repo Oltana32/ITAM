@@ -4,6 +4,7 @@ from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
 from .models import AuditSession, AuditFinding, VarianceReport
+from django.apps import apps as django_apps
 
 User = get_user_model()
 
@@ -14,6 +15,8 @@ class AuditFindingSerializer(serializers.ModelSerializer):
     auditor_email = serializers.CharField(source="auditor.email", read_only=True)
     auditor_name = serializers.SerializerMethodField()
     assigned_to = serializers.SerializerMethodField()
+    result = serializers.SerializerMethodField()
+    verification = serializers.JSONField(required=False)
 
     class Meta:
         model = AuditFinding
@@ -26,12 +29,14 @@ class AuditFindingSerializer(serializers.ModelSerializer):
             "assigned_to",
             "status",
             "notes",
+            "result",
             "auditor",
             "auditor_email",
             "auditor_name",
             "verified_at",
             "current_condition",
             "current_location",
+            "verification",
             "evidence_notes",
         )
         read_only_fields = ("id", "verified_at", "auditor")
@@ -45,6 +50,9 @@ class AuditFindingSerializer(serializers.ModelSerializer):
     def get_assigned_to(self, obj) -> str:
         from apps.audits.services import get_assigned_to_name
         return get_assigned_to_name(obj.asset)
+
+    def get_result(self, obj) -> str:
+        return getattr(obj, "result_status", "Not Audited")
 
 
 class VarianceReportSerializer(serializers.ModelSerializer):
@@ -81,6 +89,11 @@ class AuditSessionSerializer(serializers.ModelSerializer):
         required=False,
         queryset=User.objects.all(),
     )
+    audit_id = serializers.CharField(read_only=True)
+    audit_type = serializers.ChoiceField(choices=AuditSession.AuditType.choices, required=False)
+    lead_auditor = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), required=False, allow_null=True)
+    department = serializers.SerializerMethodField(read_only=True)
+    department_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
     findings_count = serializers.SerializerMethodField()
     variance = serializers.SerializerMethodField()
     stats = serializers.SerializerMethodField()
@@ -88,14 +101,17 @@ class AuditSessionSerializer(serializers.ModelSerializer):
     class Meta:
         model = AuditSession
         fields = (
+            "audit_id",
             "id",
             "title",
             "description",
+            "audit_type",
             "status",
             "created_by",
             "created_by_email",
             "auditors",
             "auditor_ids",
+            "lead_auditor",
             "planned_date",
             "audit_date",
             "started_at",
@@ -103,6 +119,7 @@ class AuditSessionSerializer(serializers.ModelSerializer):
             "location",
             "location_name",
             "department",
+            "department_id",
             "category",
             "total_assets_audited",
             "assets_found",
@@ -143,16 +160,49 @@ class AuditSessionSerializer(serializers.ModelSerializer):
             "progress_pct": results["progress_pct"],
         }
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        try:
+            Department = django_apps.get_model("core", "Department")
+            if Department:
+                self.fields["department"].queryset = Department.objects.all()
+        except Exception:
+            # If Department model is not present in INSTALLED_APPS, leave queryset None
+            pass
+
     def create(self, validated_data):
         auditor_ids = validated_data.pop("auditor_ids", [])
+        dept_id = validated_data.pop("department_id", None)
         instance = super().create(validated_data)
+        if dept_id is not None:
+            try:
+                from django.apps import apps as django_apps
+                Department = django_apps.get_model("core", "Department")
+                instance.department = Department.objects.filter(pk=dept_id).first()
+                instance.save(update_fields=["department"])
+            except Exception:
+                pass
         if auditor_ids:
             instance.auditors.set(auditor_ids)
         return instance
 
     def update(self, instance, validated_data):
         auditor_ids = validated_data.pop("auditor_ids", None)
+        dept_id = validated_data.pop("department_id", None)
         instance = super().update(instance, validated_data)
         if auditor_ids is not None:
             instance.auditors.set(auditor_ids)
+        if dept_id is not None:
+            try:
+                from django.apps import apps as django_apps
+                Department = django_apps.get_model("core", "Department")
+                instance.department = Department.objects.filter(pk=dept_id).first()
+                instance.save(update_fields=["department"])
+            except Exception:
+                pass
         return instance
+
+    def get_department(self, obj):
+        if not obj.department:
+            return None
+        return {"id": obj.department.id, "name": str(obj.department)}

@@ -35,6 +35,7 @@ export interface Asset {
   location: string;
   purchaseDate: string;
   purchaseCost?: number;
+  currentValue?: number;
   warrantyExpiry?: string;
   manufacturer: string;
   model: string;

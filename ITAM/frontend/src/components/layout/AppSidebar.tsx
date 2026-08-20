@@ -97,7 +97,7 @@ function NavSection({ label, items }: { label: string; items: typeof mainNav }) 
   );
 }
 
-export function AppSidebar() {
+export function AppSidebar({ mobile = false }: { mobile?: boolean }) {
   const location = useLocation();
   const [role, setRole] = useState<UserRole>(getCurrentUserRole());
 
@@ -113,7 +113,10 @@ export function AppSidebar() {
   const filteredBottomNav = useMemo(() => bottomNav.filter((item) => canAccessPath(role, item.href)), [role]);
 
   return (
-    <aside className="fixed left-0 top-0 z-40 h-screen w-60 bg-sidebar text-sidebar-foreground border-r border-sidebar-border flex flex-col">
+    <aside className={cn(
+      'flex h-full flex-col bg-sidebar text-sidebar-foreground border-r border-sidebar-border',
+      mobile ? 'w-full' : 'fixed left-0 top-0 z-40 h-screen w-60'
+    )}>
       {/* Logo */}
       <div className="flex h-14 items-center gap-2.5 border-b border-sidebar-border px-4 shrink-0">
         <img src={awashLogo} alt="Awash Wine S.C. Logo" className="h-9 w-9 rounded-lg object-contain" />

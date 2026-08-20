@@ -1,5 +1,6 @@
-import { useState, useMemo, useCallback } from 'react';
-import { ClipboardList, UserCheck, MapPin, Package, Printer, ScanLine } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { ClipboardList, UserCheck, MapPin, Package, Printer, ScanLine, MoreHorizontal } from 'lucide-react';
+import { Textarea } from '@/components/ui/textarea';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { AssetDetailDialog } from '@/components/assets/AssetDetailDialog';
 import { useAssets } from '@/hooks/useAssets';
 import { useLocations } from '@/hooks/useLocations';
@@ -16,17 +18,20 @@ import { useAssignments, Assignment } from '@/hooks/useAssignmentsQuery';
 import { categoryLabels, AssetCategory, isActiveAssignmentStatus, assignmentStatusLabels, Asset } from '@/types/asset';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
-import { QRCodeSVG } from 'qrcode.react';
 import { QrScannerDialog } from '@/components/assets/QrScannerDialog';
-import { extractAssetTag } from '@/lib/parseQrScan';
+import { extractAssetTag, findAssetByScan, parseQrScanPayload } from '@/lib/parseQrScan';
 import { returnAssetByTag } from '@/hooks/useAudits';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { getStoredUser } from '@/lib/auth';
+import { buildIssueVoucherDataFromAssignments, buildIssueVoucherPages, buildReturnVoucherPages, type IssueVoucherAsset } from '@/lib/issueVoucher';
 
 export default function Assignments() {
   const { assets, updateAsset } = useAssets();
   const { locations } = useLocations();
   const { log } = useActivityLog();
   const { assignments, refetchAssignments, createAssignment, isCreatingAssignment, updateAssignment } = useAssignments();
+  const currentUser = getStoredUser();
+  const currentUserName = `${currentUser?.first_name ?? ''} ${currentUser?.last_name ?? ''}`.trim() || currentUser?.email || 'System User';
 
   const [open, setOpen] = useState(false);
   const [assetId, setAssetId] = useState<string>('');
@@ -34,13 +39,20 @@ export default function Assignments() {
   const [assignedTo, setAssignedTo] = useState<string>('');
   const [employeeId, setEmployeeId] = useState<string>('');
   const [assetCategoryFilter, setAssetCategoryFilter] = useState<string>('all');
+  const [employeeDepartment, setEmployeeDepartment] = useState<string>(currentUser?.department ?? 'IT');
+  const [employeePosition, setEmployeePosition] = useState<string>(currentUser?.role === 'it_team' ? 'IT Staff' : 'Employee');
   const [printData, setPrintData] = useState<{
-    assetTag: string;
-    assetName: string;
-    employeeName: string;
-    employeeId: string;
-    location: string;
-    assignedAt: string;
+    voucherNumber: string;
+    issueDate: string;
+    printedBy: string;
+    employee: {
+      name: string;
+      employeeId: string;
+      department: string;
+      position: string;
+      location: string;
+    };
+    assets: IssueVoucherAsset[];
   } | null>(null);
   
   const [returnData, setReturnData] = useState<{
@@ -56,6 +68,33 @@ export default function Assignments() {
   const [detailAsset, setDetailAsset] = useState<Asset | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [returnScannerOpen, setReturnScannerOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [returnInspection, setReturnInspection] = useState({
+    inspectionDate: format(new Date(), 'yyyy-MM-dd'),
+    inspectedBy: currentUserName,
+    overallCondition: 'good',
+    physicalCondition: '',
+    functionalTest: 'passed',
+    accessoriesReturned: '',
+    missingAccessories: '',
+    requiresMaintenance: false,
+    maintenanceIssue: '',
+    dataWiped: 'yes',
+    finalAssetStatus: 'available',
+    inspectionRemarks: '',
+    employeeSignature: '',
+    itStaffSignature: '',
+    returnedBy: '',
+    receivedBy: currentUserName,
+  });
+
+  const canPrintReturnVoucher = Boolean(
+    returnData &&
+    returnInspection.inspectedBy.trim() &&
+    returnInspection.overallCondition &&
+    returnInspection.finalAssetStatus &&
+    returnInspection.itStaffSignature.trim()
+  );
 
   const assigned = useMemo(
     () => assets.filter((a) => a.assignedTo || (a.location && a.location !== 'Unassigned')),
@@ -101,6 +140,8 @@ export default function Assignments() {
     setLocationId('');
     setAssignedTo('');
     setEmployeeId('');
+    setEmployeeDepartment(currentUser?.department ?? 'IT');
+    setEmployeePosition(currentUser?.role === 'it_team' ? 'IT Staff' : 'Employee');
     setAssetCategoryFilter('all');
   };
 
@@ -114,6 +155,95 @@ export default function Assignments() {
     () => assignments.filter((a) => isActiveAssignmentStatus(a.status)),
     [assignments]
   );
+
+  const filteredAssignments = useMemo(() => {
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+
+    if (!normalizedQuery) {
+      return activeAssignments;
+    }
+
+    return activeAssignments.filter((assignment) => {
+      const haystack = [
+        assignment.asset_name,
+        assignment.asset_tag,
+        assignment.assignedTo,
+        assignment.employeeId,
+        assignment.location,
+        assignment.notes,
+        assignment.assignedBy,
+        assignment.employeeDepartment,
+        assignment.employeePosition,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+
+      return haystack.includes(normalizedQuery);
+    });
+  }, [activeAssignments, searchQuery]);
+
+  const buildReturnVoucherPreviewData = useMemo(() => {
+    if (!returnData) return null;
+    // Try to resolve a matching asset object from the current assets list
+    const resolvedAsset = assets.find(
+      (a) => String(a.id) === String(returnData.assetId) || a.assetTag === returnData.assetTag || a.tag === returnData.assetTag
+    );
+
+    const assetTag = returnData.assetTag || resolvedAsset?.assetTag || resolvedAsset?.tag || '—';
+    const assetName = returnData.assetName || resolvedAsset?.name || '—';
+    const brand = resolvedAsset?.manufacturer || resolvedAsset?.brand || '—';
+    const model = resolvedAsset?.model || '—';
+    const serialNumber = resolvedAsset?.serialNumber || '—';
+    const condition = returnInspection.overallCondition
+      ? returnInspection.overallCondition.charAt(0).toUpperCase() + returnInspection.overallCondition.slice(1)
+      : resolvedAsset?.condition
+      ? resolvedAsset.condition.charAt(0).toUpperCase() + resolvedAsset.condition.slice(1)
+      : 'Good';
+
+    return {
+      voucherNumber: `AW-${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}`,
+      issueDate: new Date().toISOString(),
+      printedBy: `${currentUser?.first_name ?? ''} ${currentUser?.last_name ?? ''}`.trim() || currentUser?.email || 'IT Asset Management System',
+      employee: {
+        name: returnData.employeeName || resolvedAsset?.assignedTo || '—',
+        employeeId: returnData.employeeId || '—',
+        department: 'IT',
+        position: 'Employee',
+        location: returnData.location || resolvedAsset?.location || '—',
+      },
+      assets: [
+        {
+          assetTag,
+          assetName,
+          brand,
+          model,
+          serialNumber,
+          condition,
+          status: returnInspection.finalAssetStatus === 'maintenance' ? 'Under Maintenance' : 'Returned',
+          qrValue: `https://itam.company.local/assets/${assetTag}`,
+        },
+      ],
+      inspection: {
+        inspectionDate: returnInspection.inspectionDate,
+        inspectedBy: returnInspection.inspectedBy,
+        overallCondition: returnInspection.overallCondition,
+        physicalCondition: returnInspection.physicalCondition,
+        functionalTest: returnInspection.functionalTest,
+        accessoriesReturned: returnInspection.accessoriesReturned,
+        missingAccessories: returnInspection.missingAccessories,
+        requiresMaintenance: returnInspection.requiresMaintenance,
+        maintenanceIssue: returnInspection.maintenanceIssue,
+        dataWiped: returnInspection.dataWiped,
+        finalAssetStatus: returnInspection.finalAssetStatus,
+        inspectionRemarks: returnInspection.inspectionRemarks,
+        employeeSignature: returnInspection.employeeSignature,
+        itStaffSignature: returnInspection.itStaffSignature,
+        returnedBy: returnInspection.returnedBy,
+        receivedBy: returnInspection.receivedBy,
+      },
+    };
+  }, [currentUser, returnData, returnInspection]);
 
   const handleSave = async () => {
     if (!assetId) { toast.error('Please select an available asset'); return; }
@@ -157,13 +287,29 @@ export default function Assignments() {
         type: 'assigned',
         description: notes,
       });
+      const assetTag = asset.assetTag || asset.tag || 'AW-0001';
       setPrintData({
-        assetTag: asset.assetTag,
-        assetName: asset.name,
-        employeeName: assignedTo.trim(),
-        employeeId: employeeId.trim(),
-        location: locationLabel,
-        assignedAt: new Date().toISOString(),
+        voucherNumber: `AW-${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`,
+        issueDate: today.toISOString(),
+        printedBy: `${currentUser?.first_name ?? ''} ${currentUser?.last_name ?? ''}`.trim() || currentUser?.email || 'IT Asset Management System',
+        employee: {
+          name: assignedTo.trim(),
+          employeeId: employeeId.trim(),
+          department: employeeDepartment.trim() || 'IT',
+          position: employeePosition.trim() || 'Employee',
+          location: locationLabel,
+        },
+        assets: [{
+          assetTag,
+          assetName: asset.name,
+          brand: asset.manufacturer || '—',
+          model: asset.model || '—',
+          serialNumber: asset.serialNumber || '—',
+          condition: asset.condition ? asset.condition.charAt(0).toUpperCase() + asset.condition.slice(1) : 'Good',
+          status: 'Assigned',
+          qrValue: `https://itam.company.local/assets/${assetTag}`,
+          specs: asset.specs,
+        }],
       });
       toast.success('Assignment saved');
       reset();
@@ -183,44 +329,104 @@ export default function Assignments() {
     }
   };
 
-  const handleQrReturn = async (raw: string) => {
+  const handleQrReturn = (raw: string) => {
     const assetTag = extractAssetTag(raw);
-    try {
-      await returnAssetByTag(assetTag);
-      await refetchAssignments();
-      window.dispatchEvent(new Event('asset-buddy-assignments-changed'));
-      log({
-        assetId: '',
-        assetName: assetTag,
-        type: 'returned',
-        description: `Asset ${assetTag} returned via QR scan`,
-      });
-      toast.success(`Asset ${assetTag} returned to available`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to return asset');
+    const scannedCandidates = parseQrScanPayload(raw);
+    const matchedAsset = findAssetByScan(assets, raw);
+    const assignment = assignments.find((item) => {
+      if (!isActiveAssignmentStatus(item.status)) return false;
+      if (matchedAsset && String(item.asset) === matchedAsset.id) return true;
+      return scannedCandidates.some((candidate) =>
+        candidate === item.asset_tag || candidate === String(item.asset)
+      );
+    });
+
+    setReturnScannerOpen(false);
+
+    if (!assignment) {
+      toast.error(`No active assignment found for scanned asset ${assetTag}`);
+      return;
     }
+
+    setReturnData({
+      assignmentId: assignment.id,
+      assetId: String(assignment.asset),
+      assetTag: assignment.asset_tag || assetTag,
+      assetName: assignment.asset_name,
+      employeeName: assignment.assignedTo,
+      employeeId: assignment.employeeId,
+      location: assignment.location,
+      assignedDate: assignment.assigned_date,
+    });
+    setReturnInspection((current) => ({
+      ...current,
+      inspectionDate: format(new Date(), 'yyyy-MM-dd'),
+      inspectedBy: current.inspectedBy || currentUserName,
+      returnedBy: assignment.assignedTo || current.returnedBy,
+      receivedBy: currentUserName,
+      employeeSignature: current.employeeSignature,
+      itStaffSignature: current.itStaffSignature || currentUserName,
+    }));
   };
 
   const handleReturnAsset = async () => {
     if (!returnData) return;
 
+    if (!returnInspection.inspectedBy.trim()) {
+      toast.error('Please enter the inspector name');
+      return;
+    }
+
+    if (!returnInspection.overallCondition.trim()) {
+      toast.error('Please select the overall condition');
+      return;
+    }
+
+    if (!returnInspection.finalAssetStatus) {
+      toast.error('Please select the final asset status');
+      return;
+    }
+
+    if (!returnInspection.itStaffSignature.trim()) {
+      toast.error('Please capture the IT staff signature');
+      return;
+    }
+
     try {
-      await updateAssignment({
-        id: returnData.assignmentId,
-        payload: {
-          status: 'returned',
-          actualReturnDate: format(new Date(), 'yyyy-MM-dd'),
+      const inspectionInspector = returnInspection.inspectedBy.trim() || currentUserName;
+      const inspectionReceiver = returnInspection.receivedBy.trim() || currentUserName;
+
+      await returnAssetByTag({
+        assetTag: returnData.assetTag,
+        inspection: {
+          inspectionDate: returnInspection.inspectionDate,
+          inspectedBy: inspectionInspector,
+          overallCondition: returnInspection.overallCondition,
+          physicalCondition: returnInspection.physicalCondition.split(',').map((item) => item.trim()).filter(Boolean),
+          functionalTest: returnInspection.functionalTest,
+          accessoriesReturned: returnInspection.accessoriesReturned.split(',').map((item) => item.trim()).filter(Boolean),
+          missingAccessories: returnInspection.missingAccessories,
+          requiresMaintenance: returnInspection.requiresMaintenance,
+          maintenanceIssue: returnInspection.maintenanceIssue,
+          dataWiped: returnInspection.dataWiped,
+          finalAssetStatus: returnInspection.finalAssetStatus,
+          inspectionRemarks: returnInspection.inspectionRemarks,
+          employeeSignature: returnInspection.employeeSignature,
+          itStaffSignature: returnInspection.itStaffSignature,
+          returnedBy: returnInspection.returnedBy,
+          receivedBy: inspectionReceiver,
         },
       });
 
       const asset = assets.find((a) => a.id === returnData.assetId);
+      const nextStatus = returnInspection.finalAssetStatus === 'maintenance' ? 'maintenance' : returnInspection.finalAssetStatus === 'retired' ? 'retired' : returnInspection.finalAssetStatus === 'disposed' ? 'disposed' : 'available';
       if (asset) {
-        await updateAsset(asset.id, { status: 'returned' });
-        await updateAsset(asset.id, { status: 'available' });
+        await updateAsset(asset.id, { status: nextStatus, assignedTo: '', employeeId: '' });
       }
 
       // Refresh assignments and assets
       await refetchAssignments();
+      window.dispatchEvent(new Event('asset-buddy-assignments-changed'));
 
       log({
         assetId: returnData.assetId,
@@ -229,8 +435,26 @@ export default function Assignments() {
         description: `${returnData.assetName} returned by ${returnData.employeeName} (${returnData.employeeId})`,
       });
 
-      toast.success('Asset returned successfully');
+      toast.success(`Asset ${returnData.assetTag} returned successfully`);
       setReturnData(null);
+      setReturnInspection({
+        inspectionDate: format(new Date(), 'yyyy-MM-dd'),
+        inspectedBy: '',
+        overallCondition: 'good',
+        physicalCondition: '',
+        functionalTest: 'passed',
+        accessoriesReturned: '',
+        missingAccessories: '',
+        requiresMaintenance: false,
+        maintenanceIssue: '',
+        dataWiped: 'yes',
+        finalAssetStatus: 'available',
+        inspectionRemarks: '',
+        employeeSignature: '',
+        itStaffSignature: '',
+        returnedBy: '',
+        receivedBy: '',
+      });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to return asset');
     }
@@ -261,7 +485,7 @@ export default function Assignments() {
                 New Assignment
               </Button>
             </DialogTrigger>
-            <DialogContent>
+            <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>New asset assignment</DialogTitle>
                 <DialogDescription>
@@ -336,6 +560,26 @@ export default function Assignments() {
                 </div>
 
                 <div className="grid gap-2">
+                  <Label htmlFor="employee-department">Department</Label>
+                  <Input
+                    id="employee-department"
+                    value={employeeDepartment}
+                    onChange={(e) => setEmployeeDepartment(e.target.value)}
+                    placeholder="e.g. IT"
+                  />
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="employee-position">Position</Label>
+                  <Input
+                    id="employee-position"
+                    value={employeePosition}
+                    onChange={(e) => setEmployeePosition(e.target.value)}
+                    placeholder="e.g. System Administrator"
+                  />
+                </div>
+
+                <div className="grid gap-2">
                   <Label htmlFor="employee-id">Employee ID</Label>
                   <Input
                     id="employee-id"
@@ -346,7 +590,7 @@ export default function Assignments() {
                   />
                 </div>
               </div>
-              <DialogFooter>
+              <DialogFooter className="sticky bottom-0 bg-white py-3 flex justify-end gap-2 border-t border-border">
                 <Button variant="outline" onClick={() => { setOpen(false); reset(); }}>Cancel</Button>
                 <Button onClick={handleSave} disabled={isCreatingAssignment}>
                   {isCreatingAssignment ? 'Saving…' : 'Save & Print Agreement'}
@@ -379,17 +623,28 @@ export default function Assignments() {
         </div>
 
         <Card className="animate-fade-in-up">
-          <CardHeader>
-            <CardTitle>Allocated Assets ({activeAssignments.length})</CardTitle>
+          <CardHeader className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <CardTitle>Allocated Assets ({filteredAssignments.length})</CardTitle>
+            <div className="w-full md:w-80">
+              <Input
+                placeholder="Search assignments..."
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+              />
+            </div>
           </CardHeader>
           <CardContent>
             {assignments.length === 0 ? (
               <p className="text-sm text-muted-foreground py-8 text-center">
                 No assignment records yet. Create an assignment to get started.
               </p>
+            ) : filteredAssignments.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-8 text-center">
+                No assignments found for “{searchQuery}”.
+              </p>
             ) : (
               <div className="space-y-2">
-                {activeAssignments.map((assignment) => (
+                {filteredAssignments.map((assignment) => (
                   <div
                     key={assignment.id}
                     role="button"
@@ -427,28 +682,97 @@ export default function Assignments() {
                         {assignmentStatusLabels[assignment.status] ?? assignment.status}
                       </Badge>
                       {isActiveAssignmentStatus(assignment.status) && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const asset = assets.find((a) => a.id === String(assignment.asset));
-                            if (asset) {
-                              setReturnData({
-                                assignmentId: assignment.id,
-                                assetId: String(assignment.asset),
-                                assetTag: assignment.asset_tag,
-                                assetName: assignment.asset_name,
-                                employeeName: assignment.assignedTo,
-                                employeeId: assignment.employeeId,
-                                location: assignment.location,
-                                assignedDate: assignment.assigned_date,
-                              });
-                            }
-                          }}
-                        >
-                          <span>Return</span>
-                        </Button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={(e) => e.stopPropagation()}
+                              aria-label={`Open actions for ${assignment.asset_name}`}
+                            >
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+                            <DropdownMenuItem
+                              className="gap-2"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const asset = assets.find((a) => a.id === String(assignment.asset));
+                                if (asset) {
+                                  setReturnData({
+                                    assignmentId: assignment.id,
+                                    assetId: String(assignment.asset),
+                                    assetTag: assignment.asset_tag,
+                                    assetName: assignment.asset_name,
+                                    employeeName: assignment.assignedTo,
+                                    employeeId: assignment.employeeId,
+                                    location: assignment.location,
+                                    assignedDate: assignment.assigned_date,
+                                  });
+                                  setReturnInspection((current) => ({
+                                    ...current,
+                                    inspectionDate: format(new Date(), 'yyyy-MM-dd'),
+                                    inspectedBy: current.inspectedBy || currentUserName,
+                                    returnedBy: assignment.assignedTo || current.returnedBy,
+                                    receivedBy: currentUserName,
+                                    employeeSignature: current.employeeSignature,
+                                    itStaffSignature: current.itStaffSignature || currentUserName,
+                                  }));
+                                }
+                              }}
+                            >
+                              <UserCheck className="h-4 w-4" />
+                              Return
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              className="gap-2"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const asset = assets.find((a) => a.id === String(assignment.asset));
+                                const assetTag = assignment.asset_tag || asset?.assetTag || asset?.tag || '—';
+                                const assetName = assignment.asset_name || asset?.name || '—';
+                                const brand = assignment.asset_manufacturer || assignment.manufacturer || asset?.manufacturer || '—';
+                                const model = assignment.asset_model || assignment.model || asset?.model || '—';
+                                const serialNumber = assignment.asset_serial_number || assignment.serialNumber || asset?.serialNumber || '—';
+                                const conditionValue = assignment.asset_condition || asset?.condition;
+                                const condition = conditionValue
+                                  ? conditionValue.charAt(0).toUpperCase() + conditionValue.slice(1)
+                                  : 'Good';
+
+                                const employeeAssignments = activeAssignments.filter((item) =>
+                                  (item.assignedTo || '').trim().toLowerCase() === (assignment.assignedTo || '').trim().toLowerCase()
+                                );
+                                const voucherData = buildIssueVoucherDataFromAssignments({
+                                  employeeName: assignment.assignedTo || 'Unknown',
+                                  employeeId: assignment.employeeId || '—',
+                                  department: assignment.employeeDepartment || 'IT',
+                                  position: assignment.employeePosition || 'Employee',
+                                  location: assignment.location || '—',
+                                  printedBy: `${currentUser?.first_name ?? ''} ${currentUser?.last_name ?? ''}`.trim() || currentUser?.email || 'IT Asset Management System',
+                                  assignments: employeeAssignments,
+                                  assets: assets.map((item) => ({
+                                    id: item.id,
+                                    name: item.name,
+                                    assetTag: item.assetTag || item.tag,
+                                    tag: item.tag,
+                                    manufacturer: item.manufacturer,
+                                    model: item.model,
+                                    serialNumber: item.serialNumber,
+                                    condition: item.condition,
+                                    category: item.category,
+                                    specs: item.specs,
+                                  })),
+                                });
+                                setPrintData(voucherData);
+                              }}
+                            >
+                              <Printer className="h-4 w-4" />
+                              Print Agreement
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       )}
                     </div>
                   </div>
@@ -467,101 +791,35 @@ export default function Assignments() {
               </DialogDescription>
             </DialogHeader>
             {printData ? (
-              <div className="space-y-6 py-4">
-                <div className="rounded-2xl border border-border p-6 bg-muted/50">
-                  <div className="text-center mb-4">
-                    <h2 className="text-xl font-bold">ASSET ASSIGNMENT AGREEMENT</h2>
-                    <p className="text-sm text-muted-foreground">Asset Buddy Management System</p>
-                  </div>
-
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-3">
-                      <div>
-                        <p className="text-xs text-muted-foreground font-medium">ASSET DETAILS</p>
-                        <p className="text-lg font-semibold">{printData.assetName}</p>
-                        <p className="text-sm text-muted-foreground">Asset Tag: <span className="font-mono font-bold">{printData.assetTag}</span></p>
-                      </div>
-
-                      <div>
-                        <p className="text-xs text-muted-foreground font-medium">ASSIGNEE DETAILS</p>
-                        <p className="text-lg font-semibold">{printData.employeeName}</p>
-                        <p className="text-sm text-muted-foreground">Employee ID: <span className="font-mono font-bold">{printData.employeeId}</span></p>
-                      </div>
-
-                      <div>
-                        <p className="text-xs text-muted-foreground font-medium">LOCATION & DATE</p>
-                        <p className="font-semibold">{printData.location}</p>
-                        <p className="text-sm text-muted-foreground">Assigned: {format(new Date(printData.assignedAt), 'PPP')}</p>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col items-center gap-4">
-                      <div className="text-center">
-                        <p className="text-xs text-muted-foreground font-medium mb-2">BARCODE</p>
-                        <div className="bg-white p-3 rounded-lg border-2 border-gray-300">
-                          <div className="text-center font-mono text-2xl font-bold tracking-wider">
-                            {printData.assetTag.split('').map((char, i) => (
-                              <span key={i} className="inline-block mx-0.5">{char}</span>
-                            ))}
-                          </div>
-                          <p className="text-xs text-center mt-1 font-mono">{printData.assetTag}</p>
-                        </div>
-                      </div>
-
-                      <div className="text-center">
-                        <p className="text-xs text-muted-foreground font-medium mb-2">QR CODE</p>
-                        <div className="inline-flex items-center justify-center rounded-xl bg-white p-4 shadow-sm border">
-                          <QRCodeSVG
-                            value={JSON.stringify({
-                              tag: printData.assetTag,
-                              name: printData.assetName,
-                              employeeId: printData.employeeId,
-                              employeeName: printData.employeeName,
-                              location: printData.location,
-                              assignedAt: printData.assignedAt
-                            })}
-                            size={120}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-6 pt-4 border-t border-border">
-                    <div className="grid gap-4 md:grid-cols-2 text-xs">
-                      <div>
-                        <p className="font-medium mb-2">ASSIGNEE SIGNATURE</p>
-                        <div className="border-b border-gray-400 h-8"></div>
-                        <p className="text-muted-foreground mt-1">Signature: ___________________________</p>
-                        <p className="text-muted-foreground">Date: _______________________________</p>
-                      </div>
-                      <div>
-                        <p className="font-medium mb-2">IT DEPARTMENT APPROVAL</p>
-                        <div className="border-b border-gray-400 h-8"></div>
-                        <p className="text-muted-foreground mt-1">Signature: ___________________________</p>
-                        <p className="text-muted-foreground">Date: _______________________________</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 text-center text-xs text-muted-foreground">
-                    <p>This agreement confirms the assignment of the above asset to the employee.</p>
-                    <p>Asset must be returned in good condition. Loss or damage may result in charges.</p>
-                  </div>
+              <div className="space-y-4 py-4">
+                <div className="rounded-xl border border-border bg-muted/30 p-2">
+                  <iframe
+                    title="ICT equipment issue voucher preview"
+                    srcDoc={buildIssueVoucherPages(printData, `${window.location.origin}/awash%20wine%20logo.png`)[0]?.html ?? ''}
+                    className="h-[70vh] w-full rounded-lg border border-border bg-white"
+                  />
                 </div>
-
                 <div className="flex flex-wrap gap-2 justify-end">
-                  <Button variant="outline" onClick={() => setPrintData(null)}>Cancel</Button>
-                  <Button onClick={() => {
-                    const printWindow = window.open('', '_blank');
-                    if (!printWindow) return;
-                    printWindow.document.write(`<!DOCTYPE html><html><head><title>Asset Assignment Agreement</title><style>body{font-family:system-ui,Arial,sans-serif;padding:24px;color:#111;background:#fff;max-width:800px;margin:0 auto;} .header{text-align:center;margin-bottom:24px;} .section{margin-bottom:20px;} .field{display:flex;margin-bottom:8px;} .label{font-weight:600;width:120px;flex-shrink:0;} .value{flex:1;} .barcode{text-align:center;margin:20px 0;padding:16px;background:#f8f9fa;border:2px solid #dee2e6;border-radius:8px;} .barcode-text{font-family:monospace;font-size:24px;font-weight:bold;letter-spacing:2px;} .qr{text-align:center;margin:20px 0;} .signatures{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:32px;padding-top:16px;border-top:1px solid #dee2e6;} .signature{border-bottom:1px solid #ccc;height:40px;margin-bottom:8px;} .footer{text-align:center;margin-top:24px;font-size:12px;color:#666;}</style></head><body><div class="header"><h1>ASSET ASSIGNMENT AGREEMENT</h1><p>Asset Buddy Management System</p></div><div class="section"><div class="field"><span class="label">Asset Name:</span><span class="value">${printData.assetName}</span></div><div class="field"><span class="label">Asset Tag:</span><span class="value font-mono">${printData.assetTag}</span></div><div class="field"><span class="label">Employee:</span><span class="value">${printData.employeeName}</span></div><div class="field"><span class="label">Employee ID:</span><span class="value font-mono">${printData.employeeId}</span></div><div class="field"><span class="label">Location:</span><span class="value">${printData.location}</span></div><div class="field"><span class="label">Assigned Date:</span><span class="value">${format(new Date(printData.assignedAt), 'PPP')}</span></div></div><div class="barcode"><div class="barcode-text">${printData.assetTag.split('').join(' ')}</div><div style="font-family:monospace;font-size:12px;margin-top:8px;">${printData.assetTag}</div></div><div class="qr"><img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(JSON.stringify({ tag: printData.assetTag, name: printData.assetName, employeeId: printData.employeeId, employeeName: printData.employeeName, location: printData.location, assignedAt: printData.assignedAt }))}" alt="QR Code" /></div><div class="signatures"><div><div class="signature"></div><div style="font-size:12px;">Assignee Signature</div></div><div><div class="signature"></div><div style="font-size:12px;">IT Department Approval</div></div></div><div class="footer"><p>This agreement confirms the assignment of the above asset to the employee. Asset must be returned in good condition.</p></div></body></html>`);
-                    printWindow.document.close();
-                    printWindow.focus();
-                    printWindow.print();
-                  }} className="gap-2">
+                  <Button variant="outline" onClick={() => setPrintData(null)}>Close</Button>
+                  <Button
+                    onClick={() => {
+                      const voucherPages = buildIssueVoucherPages(printData, `${window.location.origin}/awash%20wine%20logo.png`);
+                      const printWindow = window.open('', '_blank');
+                      if (!printWindow) return;
+
+                      const printBody = voucherPages
+                        .map((page) => page.html.replace(/<!DOCTYPE html><html[^>]*><head>[\s\S]*?<body>/i, '').replace(/<\/body><\/html>/i, ''))
+                        .join('<div style="page-break-after: always;"></div>');
+
+                      const printHtml = `<!DOCTYPE html><html><head><title>ICT Equipment Issue Voucher</title><style>@page{size:A4 portrait;margin:12mm}body{margin:0;padding:0;font-family:Arial,Helvetica,sans-serif;background:#fff;color:#111827}img{max-width:100%;display:block;} .voucher-asset{max-width:100%;height:auto;} .qr-img{image-rendering:crisp-edges;}</style></head><body>${printBody}<script>window.addEventListener('load',function(){const assets=Array.from(document.querySelectorAll('.voucher-asset'));const isReady=()=>assets.every((img)=>img.tagName!=='IMG'||(img.complete&&img.naturalWidth!==0));if(assets.length===0){window.print();return;}assets.forEach((img)=>{if(img.tagName==='IMG'&&!img.complete){img.addEventListener('load',isReady);img.addEventListener('error',isReady);}});setTimeout(isReady,1200);});</script></body></html>`;
+                      printWindow.document.write(printHtml);
+                      printWindow.document.close();
+                      printWindow.focus();
+                    }}
+                    className="gap-2"
+                  >
                     <Printer className="h-4 w-4" />
-                    Print Assignment
+                    Print Voucher
                   </Button>
                 </div>
               </div>
@@ -569,7 +827,24 @@ export default function Assignments() {
           </DialogContent>
         </Dialog>
 
-        <Dialog open={Boolean(returnData)} onOpenChange={(open) => { if (!open) setReturnData(null); }}>
+        <Dialog open={Boolean(returnData)} onOpenChange={(open) => { if (!open) { setReturnData(null); setReturnInspection({
+          inspectionDate: format(new Date(), 'yyyy-MM-dd'),
+          inspectedBy: '',
+          overallCondition: 'good',
+          physicalCondition: '',
+          functionalTest: 'passed',
+          accessoriesReturned: '',
+          missingAccessories: '',
+          requiresMaintenance: false,
+          maintenanceIssue: '',
+          dataWiped: 'yes',
+          finalAssetStatus: 'available',
+          inspectionRemarks: '',
+          employeeSignature: '',
+          itStaffSignature: '',
+          returnedBy: '',
+          receivedBy: '',
+        }); } }}>
           <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Asset Return Agreement</DialogTitle>
@@ -578,107 +853,124 @@ export default function Assignments() {
               </DialogDescription>
             </DialogHeader>
             {returnData ? (
-              <div className="space-y-6 py-4">
-                <div className="rounded-2xl border border-border p-6 bg-muted/50">
-                  <div className="text-center mb-4">
-                    <h2 className="text-xl font-bold">ASSET RETURN AGREEMENT</h2>
-                    <p className="text-sm text-muted-foreground">Asset Buddy Management System</p>
-                  </div>
-
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-3">
-                      <div>
-                        <p className="text-xs text-muted-foreground font-medium">ASSET DETAILS</p>
-                        <p className="text-lg font-semibold">{returnData.assetName}</p>
-                        <p className="text-sm text-muted-foreground">Asset Tag: <span className="font-mono font-bold">{returnData.assetTag}</span></p>
-                      </div>
-
-                      <div>
-                        <p className="text-xs text-muted-foreground font-medium">RETURNED BY</p>
-                        <p className="text-lg font-semibold">{returnData.employeeName}</p>
-                        <p className="text-sm text-muted-foreground">Employee ID: <span className="font-mono font-bold">{returnData.employeeId}</span></p>
-                      </div>
-
-                      <div>
-                        <p className="text-xs text-muted-foreground font-medium">LOCATION & DATES</p>
-                        <p className="font-semibold">{returnData.location}</p>
-                        <p className="text-sm text-muted-foreground">
-                          Assigned: {format(new Date(returnData.assignedDate), 'PPP')}
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          Returned: {format(new Date(), 'PPP')}
-                        </p>
-                      </div>
+              <div className="space-y-4 py-4">
+                <div className="grid gap-3 rounded-xl border border-border bg-muted/30 p-3">
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div>
+                      <Label htmlFor="inspection-date">Inspection Date</Label>
+                      <Input id="inspection-date" type="date" value={returnInspection.inspectionDate} onChange={(e) => setReturnInspection((current) => ({ ...current, inspectionDate: e.target.value }))} />
                     </div>
-
-                    <div className="flex flex-col items-center gap-4">
-                      <div className="text-center">
-                        <p className="text-xs text-muted-foreground font-medium mb-2">ASSET BARCODE</p>
-                        <div className="bg-white p-3 rounded-lg border-2 border-gray-300">
-                          <div className="text-center font-mono text-2xl font-bold tracking-wider">
-                            {returnData.assetTag.split('').map((char, i) => (
-                              <span key={i} className="inline-block mx-0.5">{char}</span>
-                            ))}
-                          </div>
-                          <p className="text-xs text-center mt-1 font-mono">{returnData.assetTag}</p>
-                        </div>
-                      </div>
-
-                      <div className="text-center">
-                        <p className="text-xs text-muted-foreground font-medium mb-2">RETURN QR CODE</p>
-                        <div className="inline-flex items-center justify-center rounded-xl bg-white p-4 shadow-sm border">
-                          <QRCodeSVG
-                            value={JSON.stringify({
-                              tag: returnData.assetTag,
-                              name: returnData.assetName,
-                              employeeId: returnData.employeeId,
-                              employeeName: returnData.employeeName,
-                              location: returnData.location,
-                              returnedDate: new Date().toISOString()
-                            })}
-                            size={120}
-                          />
-                        </div>
-                      </div>
+                    <div>
+                      <Label htmlFor="inspected-by">Inspected By</Label>
+                      <Input id="inspected-by" value={returnInspection.inspectedBy} onChange={(e) => setReturnInspection((current) => ({ ...current, inspectedBy: e.target.value }))} placeholder="IT staff name" />
                     </div>
                   </div>
-
-                  <div className="mt-6 pt-4 border-t border-border">
-                    <div className="grid gap-4 md:grid-cols-2 text-xs">
-                      <div>
-                        <p className="font-medium mb-2">EMPLOYEE SIGNATURE</p>
-                        <div className="border-b border-gray-400 h-8"></div>
-                        <p className="text-muted-foreground mt-1">Signature: ___________________________</p>
-                        <p className="text-muted-foreground">Date: _______________________________</p>
-                      </div>
-                      <div>
-                        <p className="font-medium mb-2">IT DEPARTMENT RECEIVED BY</p>
-                        <div className="border-b border-gray-400 h-8"></div>
-                        <p className="text-muted-foreground mt-1">Signature: ___________________________</p>
-                        <p className="text-muted-foreground">Date: _______________________________</p>
-                      </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div>
+                      <Label htmlFor="overall-condition">Overall Condition</Label>
+                      <Select value={returnInspection.overallCondition} onValueChange={(value) => setReturnInspection((current) => ({ ...current, overallCondition: value }))}>
+                        <SelectTrigger><SelectValue placeholder="Condition" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="good">Good</SelectItem>
+                          <SelectItem value="fair">Fair</SelectItem>
+                          <SelectItem value="damaged">Damaged</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label htmlFor="final-status">Final Asset Status</Label>
+                      <Select value={returnInspection.finalAssetStatus} onValueChange={(value) => setReturnInspection((current) => ({ ...current, finalAssetStatus: value }))}>
+                        <SelectTrigger><SelectValue placeholder="Status" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="available">Available</SelectItem>
+                          <SelectItem value="maintenance">Under Maintenance</SelectItem>
+                          <SelectItem value="retired">Retired</SelectItem>
+                          <SelectItem value="disposed">Disposed</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
                   </div>
-
-                  <div className="mt-4 text-center text-xs text-muted-foreground">
-                    <p>This agreement confirms the return of the above asset from the employee.</p>
-                    <p>The asset has been inspected and is being returned to inventory.</p>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div>
+                      <Label htmlFor="physical-condition">Physical Condition</Label>
+                      <Input id="physical-condition" value={returnInspection.physicalCondition} onChange={(e) => setReturnInspection((current) => ({ ...current, physicalCondition: e.target.value }))} placeholder="Scratches, missing cover" />
+                    </div>
+                    <div>
+                      <Label htmlFor="functional-test">Functional Test</Label>
+                      <Input id="functional-test" value={returnInspection.functionalTest} onChange={(e) => setReturnInspection((current) => ({ ...current, functionalTest: e.target.value }))} placeholder="passed / failed" />
+                    </div>
                   </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div>
+                      <Label htmlFor="accessories-returned">Accessories Returned</Label>
+                      <Input id="accessories-returned" value={returnInspection.accessoriesReturned} onChange={(e) => setReturnInspection((current) => ({ ...current, accessoriesReturned: e.target.value }))} placeholder="Charger, mouse" />
+                    </div>
+                    <div>
+                      <Label htmlFor="missing-accessories">Missing Accessories</Label>
+                      <Input id="missing-accessories" value={returnInspection.missingAccessories} onChange={(e) => setReturnInspection((current) => ({ ...current, missingAccessories: e.target.value }))} placeholder="Optional" />
+                    </div>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div>
+                      <Label htmlFor="maintenance-issue">Maintenance Issue</Label>
+                      <Input id="maintenance-issue" value={returnInspection.maintenanceIssue} onChange={(e) => setReturnInspection((current) => ({ ...current, maintenanceIssue: e.target.value }))} placeholder="Optional" />
+                    </div>
+                    <div>
+                      <Label htmlFor="data-wiped">Data Wiped</Label>
+                      <Input id="data-wiped" value={returnInspection.dataWiped} onChange={(e) => setReturnInspection((current) => ({ ...current, dataWiped: e.target.value }))} placeholder="yes / no" />
+                    </div>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div>
+                      <Label htmlFor="returned-by">Returned By</Label>
+                      <Input id="returned-by" value={returnInspection.returnedBy} onChange={(e) => setReturnInspection((current) => ({ ...current, returnedBy: e.target.value }))} placeholder="Employee" />
+                    </div>
+                  </div>
+                  <div>
+                    <Label htmlFor="inspection-remarks">Inspection Remarks</Label>
+                    <Textarea id="inspection-remarks" value={returnInspection.inspectionRemarks} onChange={(e) => setReturnInspection((current) => ({ ...current, inspectionRemarks: e.target.value }))} rows={3} placeholder="Notes about defects, accessories, or follow-up" />
+                  </div>
+                  <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <input type="checkbox" checked={returnInspection.requiresMaintenance} onChange={(e) => setReturnInspection((current) => ({ ...current, requiresMaintenance: e.target.checked }))} />
+                    Requires maintenance / follow-up
+                  </label>
                 </div>
-
+                {!canPrintReturnVoucher ? (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">
+                    Complete the inspection details to enable the return voucher print preview.
+                  </div>
+                ) : null}
+                <div className="rounded-xl border border-border bg-muted/30 p-2">
+                  <iframe
+                    title="IT equipment return voucher preview"
+                    srcDoc={canPrintReturnVoucher ? buildReturnVoucherPages(buildReturnVoucherPreviewData, `${window.location.origin}/awash%20wine%20logo.png`)[0]?.html ?? '' : ''}
+                    className="h-[70vh] w-full rounded-lg border border-border bg-white"
+                  />
+                </div>
                 <div className="flex flex-wrap gap-2 justify-end">
                   <Button variant="outline" onClick={() => setReturnData(null)}>Close without Printing</Button>
-                  <Button variant="outline" onClick={() => {
-                    const printWindow = window.open('', '_blank');
-                    if (!printWindow) return;
-                    printWindow.document.write(`<!DOCTYPE html><html><head><title>Asset Return Agreement</title><style>body{font-family:system-ui,Arial,sans-serif;padding:24px;color:#111;background:#fff;max-width:800px;margin:0 auto;} .header{text-align:center;margin-bottom:24px;} .section{margin-bottom:20px;} .field{display:flex;margin-bottom:8px;} .label{font-weight:600;width:120px;flex-shrink:0;} .value{flex:1;} .barcode{text-align:center;margin:20px 0;padding:16px;background:#f8f9fa;border:2px solid #dee2e6;border-radius:8px;} .barcode-text{font-family:monospace;font-size:24px;font-weight:bold;letter-spacing:2px;} .qr{text-align:center;margin:20px 0;} .signatures{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:32px;padding-top:16px;border-top:1px solid #dee2e6;} .signature{border-bottom:1px solid #ccc;height:40px;margin-bottom:8px;} .footer{text-align:center;margin-top:24px;font-size:12px;color:#666;}</style></head><body><div class="header"><h1>ASSET RETURN AGREEMENT</h1><p>Asset Buddy Management System</p></div><div class="section"><div class="field"><span class="label">Asset Name:</span><span class="value">${returnData.assetName}</span></div><div class="field"><span class="label">Asset Tag:</span><span class="value font-mono">${returnData.assetTag}</span></div><div class="field"><span class="label">Returned By:</span><span class="value">${returnData.employeeName}</span></div><div class="field"><span class="label">Employee ID:</span><span class="value font-mono">${returnData.employeeId}</span></div><div class="field"><span class="label">Location:</span><span class="value">${returnData.location}</span></div><div class="field"><span class="label">Assigned Date:</span><span class="value">${format(new Date(returnData.assignedDate), 'PPP')}</span></div><div class="field"><span class="label">Return Date:</span><span class="value">${format(new Date(), 'PPP')}</span></div></div><div class="barcode"><div class="barcode-text">${returnData.assetTag.split('').join(' ')}</div><div style="font-family:monospace;font-size:12px;margin-top:8px;">${returnData.assetTag}</div></div><div class="qr"><img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(JSON.stringify({ tag: returnData.assetTag, name: returnData.assetName, employeeId: returnData.employeeId, employeeName: returnData.employeeName, location: returnData.location, returnedDate: new Date().toISOString() }))}" alt="QR Code" /></div><div class="signatures"><div><div class="signature"></div><div style="font-size:12px;">Employee Signature</div></div><div><div class="signature"></div><div style="font-size:12px;">IT Department</div></div></div><div class="footer"><p>This agreement confirms the return of the above asset. The asset has been inspected and is being returned to inventory.</p></div></body></html>`);
-                    printWindow.document.close();
-                    printWindow.focus();
-                    printWindow.print();
-                  }} className="gap-2">
-                    <Printer className="h-4 w-4" />
-                    Print Return Agreement
-                  </Button>
+                  {canPrintReturnVoucher ? (
+                    <Button
+                      onClick={() => {
+                        const voucherPages = buildReturnVoucherPages(buildReturnVoucherPreviewData, `${window.location.origin}/awash%20wine%20logo.png`);
+                        const printWindow = window.open('', '_blank');
+                        if (!printWindow) return;
+
+                        const printBody = voucherPages
+                          .map((page) => page.html.replace(/<!DOCTYPE html><html[^>]*><head>[\s\S]*?<body>/i, '').replace(/<\/body><\/html>/i, ''))
+                          .join('<div style="page-break-after: always;"></div>');
+
+                        const printHtml = `<!DOCTYPE html><html><head><title>IT Equipment Return Voucher</title><style>@page{size:A4 portrait;margin:12mm}body{margin:0;padding:0;font-family:Arial,Helvetica,sans-serif;background:#fff;color:#111827}img{max-width:100%;display:block;} .voucher-asset{max-width:100%;height:auto;} .qr-img{image-rendering:crisp-edges;}</style></head><body>${printBody}<script>window.addEventListener('load',function(){setTimeout(function(){window.print();}, 400);});</script></body></html>`;
+                        printWindow.document.write(printHtml);
+                        printWindow.document.close();
+                        printWindow.focus();
+                      }}
+                      className="gap-2"
+                    >
+                      <Printer className="h-4 w-4" />
+                      Print Return Voucher
+                    </Button>
+                  ) : null}
                   <Button onClick={handleReturnAsset} className="gap-2">
                     <UserCheck className="h-4 w-4" />
                     Confirm Return

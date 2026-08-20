@@ -1,14 +1,19 @@
 import { useEffect, useState } from 'react';
-import { UserCircle, Mail, Building, Shield, Calendar } from 'lucide-react';
+import { UserCircle, Mail, Building, Shield, Calendar, Palette } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
+import { useTheme } from '@/components/theme/ThemeProvider';
 import { authFetch, getStoredUser, AuthUser } from '@/lib/auth';
 
 export default function Profile() {
   const [user, setUser] = useState<AuthUser | null>(getStoredUser());
+  const { theme, themeStyle, setTheme, setThemeStyle } = useTheme();
+  const isFinanceUser = user?.role === 'finance';
 
   useEffect(() => {
     void (async () => {
@@ -77,6 +82,55 @@ export default function Profile() {
             </div>
           </CardContent>
         </Card>
+
+        {!isFinanceUser && (
+          <Card className="animate-fade-in-up">
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Palette className="h-4 w-4 text-muted-foreground" />
+                <CardTitle className="text-base">Appearance</CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Theme Mode</Label>
+                  <Select value={theme} onValueChange={(value) => setTheme(value as 'light' | 'dark' | 'system')}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="light">Light</SelectItem>
+                      <SelectItem value="dark">Dark</SelectItem>
+                      <SelectItem value="system">System</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Theme Palette</Label>
+                  <Select value={themeStyle} onValueChange={(value) => setThemeStyle(value as 'classic' | 'ocean' | 'forest' | 'sunset' | 'vintage')}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[
+                        { value: 'classic', label: 'Classic' },
+                        { value: 'ocean', label: 'Ocean' },
+                        { value: 'forest', label: 'Forest' },
+                        { value: 'sunset', label: 'Sunset' },
+                        { value: 'vintage', label: 'Vintage' },
+                      ].map((palette) => (
+                        <SelectItem key={palette.value} value={palette.value}>
+                          {palette.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </AppLayout>
   );

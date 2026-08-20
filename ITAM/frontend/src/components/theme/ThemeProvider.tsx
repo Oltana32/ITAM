@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState } from 'react';
+import { getStoredUser } from '@/lib/auth';
 
 type Theme = 'light' | 'dark' | 'system';
 type ThemeStyle = 'classic' | 'ocean' | 'forest' | 'sunset' | 'vintage';
@@ -13,24 +14,64 @@ interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
 
-const STORAGE_KEY = 'awash-itam-theme';
-const STYLE_STORAGE_KEY = 'awash-itam-theme-style';
+const DEFAULT_THEME: Theme = 'light';
+const DEFAULT_THEME_STYLE: ThemeStyle = 'classic';
+const STORAGE_KEY_PREFIX = 'awash-itam-theme';
+const STYLE_STORAGE_KEY_PREFIX = 'awash-itam-theme-style';
 
 function getSystemTheme(): 'light' | 'dark' {
   if (typeof window === 'undefined') return 'light';
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
+function getStorageKey(prefix: string, userId?: string): string {
+  return userId ? `${prefix}:${userId}` : prefix;
+}
+
+function getCurrentUserId(): string | undefined {
+  const user = getStoredUser();
+  return user?.id;
+}
+
+function isFinanceUser(): boolean {
+  const user = getStoredUser();
+  return user?.role === 'finance';
+}
+
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>(() => {
-    if (typeof window === 'undefined') return 'system';
-    return (localStorage.getItem(STORAGE_KEY) as Theme) || 'system';
-  });
-  const [themeStyle, setThemeStyleState] = useState<ThemeStyle>(() => {
-    if (typeof window === 'undefined') return 'classic';
-    return (localStorage.getItem(STYLE_STORAGE_KEY) as ThemeStyle) || 'classic';
-  });
+  const [theme, setThemeState] = useState<Theme>(DEFAULT_THEME);
+  const [themeStyle, setThemeStyleState] = useState<ThemeStyle>(DEFAULT_THEME_STYLE);
   const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('light');
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const syncThemeFromUser = () => {
+      const userId = getCurrentUserId();
+      if (isFinanceUser()) {
+        if (userId) {
+          localStorage.removeItem(getStorageKey(STORAGE_KEY_PREFIX, userId));
+          localStorage.removeItem(getStorageKey(STYLE_STORAGE_KEY_PREFIX, userId));
+        }
+        setThemeState(DEFAULT_THEME);
+        setThemeStyleState(DEFAULT_THEME_STYLE);
+        return;
+      }
+
+      const storedTheme = (localStorage.getItem(getStorageKey(STORAGE_KEY_PREFIX, userId)) as Theme | null) || DEFAULT_THEME;
+      const storedThemeStyle = (localStorage.getItem(getStorageKey(STYLE_STORAGE_KEY_PREFIX, userId)) as ThemeStyle | null) || DEFAULT_THEME_STYLE;
+      setThemeState(storedTheme);
+      setThemeStyleState(storedThemeStyle);
+    };
+
+    syncThemeFromUser();
+    window.addEventListener('asset-buddy-auth-changed', syncThemeFromUser);
+    window.addEventListener('asset-buddy-role-changed', syncThemeFromUser);
+    return () => {
+      window.removeEventListener('asset-buddy-auth-changed', syncThemeFromUser);
+      window.removeEventListener('asset-buddy-role-changed', syncThemeFromUser);
+    };
+  }, []);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -58,12 +99,38 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, [theme, themeStyle]);
 
   const setTheme = (t: Theme) => {
-    localStorage.setItem(STORAGE_KEY, t);
+    const userId = getCurrentUserId();
+    if (isFinanceUser()) {
+      if (userId) {
+        localStorage.removeItem(getStorageKey(STORAGE_KEY_PREFIX, userId));
+      }
+      setThemeState(DEFAULT_THEME);
+      return;
+    }
+    const storageKey = getStorageKey(STORAGE_KEY_PREFIX, userId);
+    if (t === DEFAULT_THEME) {
+      localStorage.removeItem(storageKey);
+    } else {
+      localStorage.setItem(storageKey, t);
+    }
     setThemeState(t);
   };
 
   const setThemeStyle = (style: ThemeStyle) => {
-    localStorage.setItem(STYLE_STORAGE_KEY, style);
+    const userId = getCurrentUserId();
+    if (isFinanceUser()) {
+      if (userId) {
+        localStorage.removeItem(getStorageKey(STYLE_STORAGE_KEY_PREFIX, userId));
+      }
+      setThemeStyleState(DEFAULT_THEME_STYLE);
+      return;
+    }
+    const storageKey = getStorageKey(STYLE_STORAGE_KEY_PREFIX, userId);
+    if (style === DEFAULT_THEME_STYLE) {
+      localStorage.removeItem(storageKey);
+    } else {
+      localStorage.setItem(storageKey, style);
+    }
     setThemeStyleState(style);
   };
 

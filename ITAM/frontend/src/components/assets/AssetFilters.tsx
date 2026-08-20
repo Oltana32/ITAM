@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { AssetStatus, AssetCategory, statusLabels, categoryLabels } from '@/types/asset';
+import { getVisibleAssetStatusOptions } from '@/components/assets/bulkAssetFormUtils';
 
 interface AssetFiltersProps {
   searchQuery: string;
@@ -38,8 +39,8 @@ export function AssetFilters({
   onExportJSON,
 }: AssetFiltersProps) {
   return (
-    <div className="flex flex-wrap items-center gap-3 animate-fade-in" style={{ animationDelay: '0.1s', animationFillMode: 'backwards' }}>
-      <div className="relative flex-1 min-w-[250px]">
+    <div className="flex flex-col gap-3 animate-fade-in sm:flex-row sm:items-center" style={{ animationDelay: '0.1s', animationFillMode: 'backwards' }}>
+      <div className="relative w-full sm:flex-1 sm:min-w-[250px]">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           placeholder="Search by name, tag, or serial number..."
@@ -49,12 +50,12 @@ export function AssetFilters({
         />
       </div>
       <Select value={statusFilter} onValueChange={(value) => onStatusChange(value as AssetStatus | 'all')}>
-        <SelectTrigger className="w-[160px] bg-card border-border/60">
+        <SelectTrigger className="w-full sm:w-[160px] bg-card border-border/60">
           <SelectValue placeholder="Status" />
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="all">All Statuses</SelectItem>
-          {Object.entries(statusLabels).map(([value, label]) => (
+          {getVisibleAssetStatusOptions(statusLabels).map(([value, label]) => (
             <SelectItem key={value} value={value}>
               {label}
             </SelectItem>
@@ -62,7 +63,7 @@ export function AssetFilters({
         </SelectContent>
       </Select>
       <Select value={categoryFilter} onValueChange={(value) => onCategoryChange(value as AssetCategory | 'all')}>
-        <SelectTrigger className="w-[180px] bg-card border-border/60">
+        <SelectTrigger className="w-full sm:w-[180px] bg-card border-border/60">
           <SelectValue placeholder="Category" />
         </SelectTrigger>
         <SelectContent>
@@ -77,7 +78,7 @@ export function AssetFilters({
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="outline" className="gap-2 bg-card border-border/60">
+          <Button variant="outline" className="w-full gap-2 bg-card border-border/60 sm:w-auto">
             <Download className="h-4 w-4" />
             Export
           </Button>

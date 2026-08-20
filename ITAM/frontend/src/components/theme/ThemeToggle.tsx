@@ -1,5 +1,6 @@
 import { Moon, Sun, Monitor } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { getStoredUser } from '@/lib/auth';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,11 +11,13 @@ import { useTheme } from './ThemeProvider';
 
 export function ThemeToggle() {
   const { theme, setTheme } = useTheme();
+  const currentUser = getStoredUser();
+  const isFinanceUser = currentUser?.role === 'finance';
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="icon" className="h-9 w-9 relative">
+        <Button variant="outline" size="icon" className="h-9 w-9 relative" disabled={isFinanceUser}>
           <Sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
           <Moon className="absolute h-4 w-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
           <span className="sr-only">Toggle theme</span>

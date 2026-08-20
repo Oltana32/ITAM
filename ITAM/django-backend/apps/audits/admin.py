@@ -6,9 +6,9 @@ from .models import AuditSession, AuditFinding, VarianceReport
 
 @admin.register(AuditSession)
 class AuditSessionAdmin(admin.ModelAdmin):
-    list_display = ("title", "status", "audit_date", "assets_found", "assets_not_found", "created_by")
+    list_display = ("audit_id", "title", "status", "audit_date", "assets_found", "assets_not_found", "created_by")
     list_filter = ("status", "audit_date", "created_at")
-    search_fields = ("title", "description", "created_by__email")
+    search_fields = ("audit_id", "title", "description", "created_by__email")
     readonly_fields = ("created_at", "updated_at", "started_at", "completed_at")
     filter_horizontal = ("auditors",)
     
@@ -20,7 +20,10 @@ class AuditSessionAdmin(admin.ModelAdmin):
             "fields": ("planned_date", "audit_date", "started_at", "completed_at")
         }),
         ("Scope", {
-            "fields": ("location", "category")
+            "fields": ("location", "category", "department")
+        }),
+        ("Audit Info", {
+            "fields": ("audit_id", "audit_type", "lead_auditor")
         }),
         ("Auditors", {
             "fields": ("created_by", "auditors")

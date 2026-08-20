@@ -2,6 +2,7 @@
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.utils import timezone
 
 from .models import Notification, NotificationType
 
@@ -141,8 +142,16 @@ def notify_maintenance_completed(maintenance):
 
 
 @transaction.atomic
-def notify_license_expiry(license_record):
+def notify_license_expiry(license_record, days_notice: int = 90):
     """Create notification when license is nearing expiry."""
+    if not license_record.expiry_date:
+        return
+
+    now = timezone.now().date()
+    days_until_expiry = (license_record.expiry_date - now).days
+    if days_until_expiry > days_notice:
+        return
+
     try:
         from apps.users.models import UserRole
         
@@ -150,11 +159,19 @@ def notify_license_expiry(license_record):
             role__in=[UserRole.ADMIN, UserRole.IT_TEAM]
         )
         
+        message = (
+            f"License for {license_record.software_name} ({license_record.get_vendor_display()}) "
+            f"expires on {license_record.expiry_date}"
+        )
+
         for receiver in receivers:
-            Notification.objects.create(
+            Notification.objects.get_or_create(
                 notification_type=NotificationType.LICENSE_EXPIRY,
-                message=f"License for {license_record.software_name} ({license_record.get_vendor_display()}) expires on {license_record.expiry_date}",
                 user=receiver,
+                message=message,
+                defaults={
+                    'read_status': False,
+                },
             )
     except Exception as e:
         print(f"Error notifying license expiry: {e}")

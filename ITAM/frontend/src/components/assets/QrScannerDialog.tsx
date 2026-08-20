@@ -7,15 +7,30 @@ import { Camera, X, ScanLine } from 'lucide-react';
 interface QrScannerDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onScan: (result: string) => void;
+  onScan?: (result: string) => void;
+  /** Optional: called with verification payload when user confirms scan */
+  onVerify?: (payload: {
+    asset_tag: string;
+    verification: Record<string, boolean>;
+    current_condition?: string;
+    notes?: string;
+  }) => void;
   continuous?: boolean;
 }
 
-export function QrScannerDialog({ open, onOpenChange, onScan, continuous = false }: QrScannerDialogProps) {
+export function QrScannerDialog({ open, onOpenChange, onScan, onVerify, continuous = false }: QrScannerDialogProps) {
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const mountId = 'qr-reader';
+  const [pendingCode, setPendingCode] = useState<string | null>(null);
+  const [showReview, setShowReview] = useState(false);
+  const [tagMatch, setTagMatch] = useState(true);
+  const [serialMatch, setSerialMatch] = useState(true);
+  const [assignedUserCorrect, setAssignedUserCorrect] = useState(true);
+  const [locationCorrect, setLocationCorrect] = useState(true);
+  const [currentCondition, setCurrentCondition] = useState('excellent');
+  const [notes, setNotes] = useState('');
 
   useEffect(() => {
     if (!open) return;
@@ -30,7 +45,14 @@ export function QrScannerDialog({ open, onOpenChange, onScan, continuous = false
           { facingMode: 'environment' },
           { fps: 10, qrbox: { width: 250, height: 250 } },
           (decodedText) => {
-            onScan(decodedText);
+            if (onVerify) {
+              // stop and show review UI
+              stopScanner();
+              setPendingCode(decodedText);
+              setShowReview(true);
+              return;
+            }
+            if (onScan) onScan(decodedText);
             if (!continuous) {
               stopScanner();
               onOpenChange(false);
@@ -112,6 +134,60 @@ export function QrScannerDialog({ open, onOpenChange, onScan, continuous = false
               </div>
             </div>
           )}
+
+            {showReview && pendingCode && (
+              <div className="absolute inset-0 flex items-end">
+                <div className="w-full bg-card/90 backdrop-blur border-t border-border p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium">Verify scan: {pendingCode}</p>
+                      <p className="text-xs text-muted-foreground">Confirm verification details before submitting.</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button variant="ghost" size="sm" onClick={() => { setShowReview(false); setPendingCode(null); onOpenChange(false); }}>
+                        Cancel
+                      </Button>
+                      <Button size="sm" onClick={() => {
+                        if (onVerify) {
+                          onVerify({
+                            asset_tag: pendingCode,
+                            verification: {
+                              tag_match: tagMatch,
+                              serial_match: serialMatch,
+                              assigned_user_correct: assignedUserCorrect,
+                              location_correct: locationCorrect,
+                            },
+                            current_condition: currentCondition,
+                            notes: notes || undefined,
+                          });
+                        }
+                        setShowReview(false);
+                        setPendingCode(null);
+                        onOpenChange(false);
+                      }}>Confirm</Button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 mt-3">
+                    <label className="flex items-center gap-2"><input type="checkbox" checked={tagMatch} onChange={(e) => setTagMatch(e.target.checked)} /> Tag matches</label>
+                    <label className="flex items-center gap-2"><input type="checkbox" checked={serialMatch} onChange={(e) => setSerialMatch(e.target.checked)} /> Serial matches</label>
+                    <label className="flex items-center gap-2"><input type="checkbox" checked={assignedUserCorrect} onChange={(e) => setAssignedUserCorrect(e.target.checked)} /> Assigned user correct</label>
+                    <label className="flex items-center gap-2"><input type="checkbox" checked={locationCorrect} onChange={(e) => setLocationCorrect(e.target.checked)} /> Location correct</label>
+                  </div>
+                  <div className="grid gap-2 mt-3">
+                    <label className="text-xs">Condition</label>
+                    <select value={currentCondition} onChange={(e) => setCurrentCondition(e.target.value)} className="w-full">
+                      <option value="excellent">Excellent</option>
+                      <option value="good">Good</option>
+                      <option value="fair">Fair</option>
+                      <option value="poor">Poor</option>
+                      <option value="damaged">Damaged</option>
+                    </select>
+                    <label className="text-xs">Notes (optional)</label>
+                    <textarea value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full p-2 border rounded" />
+                  </div>
+                </div>
+              </div>
+            )}
 
           <p className="text-xs text-muted-foreground text-center mt-3">
             Point your camera at a QR code or barcode to scan

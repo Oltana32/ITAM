@@ -72,6 +72,7 @@ def log_asset_change(
 
     return AssetStatusHistory.objects.create(
         asset=asset,
+        asset_tag=asset.tag if asset else "",
         change_type=change_type,
         field_name=field_name,
         old_value=old_value,

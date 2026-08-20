@@ -1,7 +1,10 @@
+from decimal import Decimal
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
+from django.utils import timezone
 
 
 class Vendor(models.TextChoices):
@@ -26,6 +29,7 @@ class Vendor(models.TextChoices):
 class SoftwareLicense(models.Model):
     software_name = models.CharField(max_length=255, db_index=True)
     seats = models.PositiveIntegerField(default=1)
+    active_users = models.PositiveIntegerField(default=0)
     expiry_date = models.DateField(null=True, blank=True)
     assigned_to = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -40,6 +44,10 @@ class SoftwareLicense(models.Model):
         default=Vendor.OTHER,
     )
     notes = models.TextField(blank=True)
+    # Annual cost for this license (per year)
+    annual_cost = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    # ISO currency code for the cost
+    cost_currency = models.CharField(max_length=3, default="USD")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -56,13 +64,47 @@ class SoftwareLicense(models.Model):
         return self.assignments.filter(revoked_at__isnull=True).count()
 
     @property
+    def used_seats(self) -> int:
+        return self.allocated_seats
+
+    @property
     def available_seats(self) -> int:
         return max(self.seats - self.allocated_seats, 0)
+
+    @property
+    def utilization_percentage(self) -> int:
+        if self.seats == 0:
+            return 0
+        return int(round((self.used_seats / self.seats) * 100))
+
+    @property
+    def status(self) -> str:
+        expiry_date = self.expiry_date
+        if expiry_date:
+            if isinstance(expiry_date, str):
+                from datetime import date
+
+                expiry_date = date.fromisoformat(expiry_date)
+
+            today = timezone.now().date()
+            if expiry_date < today:
+                return "expired"
+            if (expiry_date - today).days <= 60:
+                return "warning"
+        return "active"
+
+    @property
+    def cost_per_seat(self) -> Decimal:
+        if self.seats == 0:
+            return Decimal("0.00")
+        return (Decimal(str(self.annual_cost)) / Decimal(self.seats)).quantize(Decimal("0.01"))
 
     def clean(self) -> None:
         super().clean()
         if self.seats < 1:
             raise ValidationError({"seats": "License must have at least one seat."})
+        if self.active_users > self.seats:
+            raise ValidationError({"active_users": "Active users cannot exceed total seats."})
         if self.pk and self.seats < self.allocated_seats:
             raise ValidationError(
                 {"seats": "Seats cannot be lower than active license assignments."}

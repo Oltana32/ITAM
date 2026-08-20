@@ -17,6 +17,8 @@ class AssetStatusHistorySerializer(serializers.ModelSerializer):
         model = AssetStatusHistory
         fields = (
             "id",
+            "asset",
+            "asset_tag",
             "change_type",
             "field_name",
             "field_label",

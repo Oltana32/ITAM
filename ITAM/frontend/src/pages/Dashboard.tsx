@@ -28,7 +28,13 @@ export default function Dashboard() {
   const retiredAssets = assets.filter((a) => a.status === 'retired').length;
   const unassignedAssets = assets.filter((a) => !a.assignedTo).length;
   const utilizationRate = totalAssets ? Math.round((inUseAssets / totalAssets) * 100) : 0;
-  const totalValue = assets.reduce((s, a) => s + (a.purchaseCost || 0), 0);
+  const totalValue = assets.reduce((s, a) => s + ((a.currentValue ?? a.purchaseCost) || 0), 0);
+
+  const totalValueFormatted = new Intl.NumberFormat('en-ET', {
+    style: 'currency',
+    currency: 'ETB',
+    maximumFractionDigits: 0,
+  }).format(totalValue || 0);
 
   // Warranty expiring within 90 days
   const now = Date.now();
@@ -83,7 +89,7 @@ export default function Dashboard() {
               </div>
               <h1 className="text-3xl font-bold tracking-tight">IT Asset Dashboard</h1>
               <p className="text-accent-foreground/70 max-w-md">
-                Managing {totalAssets} IT assets worth ETB {(totalValue / 1000000).toFixed(1)}M across your organization.
+                Managing {totalAssets} IT assets worth {totalValueFormatted} across your organization.
                 {maintenanceAssets > 0 && ` ${maintenanceAssets} item${maintenanceAssets !== 1 ? 's' : ''} need attention.`}
               </p>
               <div className="flex items-center gap-3 pt-2">

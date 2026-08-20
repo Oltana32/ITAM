@@ -4,6 +4,7 @@ from django.db import models
 from django.utils import timezone
 
 from apps.core.constants import AssetStatus
+from apps.notifications.services import notify_maintenance_created, notify_maintenance_completed
 
 
 class MaintenanceType(models.TextChoices):
@@ -80,7 +81,12 @@ class MaintenanceRecord(models.Model):
 
         self.full_clean()
         super().save(*args, **kwargs)
+        created = previous_status is None
         self._sync_asset_status(previous_status)
+        if created and self.status in {MaintenanceStatus.SCHEDULED, MaintenanceStatus.IN_PROGRESS}:
+            notify_maintenance_created(self)
+        elif previous_status != MaintenanceStatus.COMPLETED and self.status == MaintenanceStatus.COMPLETED:
+            notify_maintenance_completed(self)
 
     def _sync_asset_status(self, previous_status: str | None) -> None:
         if self.status == MaintenanceStatus.IN_PROGRESS and self.asset.status != AssetStatus.MAINTENANCE:

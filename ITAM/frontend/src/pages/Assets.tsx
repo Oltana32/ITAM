@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Plus, Package, ScanLine } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { AssetTable } from '@/components/assets/AssetTable';
 import { AssetFilters } from '@/components/assets/AssetFilters';
@@ -9,6 +10,9 @@ import { AssetDetailDialog } from '@/components/assets/AssetDetailDialog';
 import { DeleteAssetDialog } from '@/components/assets/DeleteAssetDialog';
 import { QrScannerDialog } from '@/components/assets/QrScannerDialog';
 import { QrCodeDialog } from '@/components/assets/QrCodeDialog';
+import { BulkImportDialog } from '@/components/assets/BulkImportDialog';
+import { BulkAssetFormDialog } from '@/components/assets/BulkAssetFormDialog';
+import { BulkAssignDialog } from '@/components/assets/BulkAssignDialog';
 import { Button } from '@/components/ui/button';
 import { useAssets } from '@/hooks/useAssets';
 import { useActivityLog } from '@/hooks/useActivityLog';
@@ -27,7 +31,7 @@ export default function Assets() {
   const { assets, addAsset, updateAsset, deleteAsset } = useAssets();
   const { log } = useActivityLog();
   
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || '');
   const [statusFilter, setStatusFilter] = useState<AssetStatus | 'all'>('all');
   const [categoryFilter, setCategoryFilter] = useState<AssetCategory | 'all'>(
     categoryFromUrl || 'all'
@@ -38,9 +42,17 @@ export default function Assets() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [qrCodeOpen, setQrCodeOpen] = useState(false);
+  const [bulkImportOpen, setBulkImportOpen] = useState(false);
+  const [bulkAssetFormOpen, setBulkAssetFormOpen] = useState(false);
+  const [bulkAssetFormInitialValues, setBulkAssetFormInitialValues] = useState<Record<string, unknown> | undefined>();
+  const [bulkAssignOpen, setBulkAssignOpen] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [role, setRole] = useState<UserRole>(getCurrentUserRole());
+
+  useEffect(() => {
+    setSearchQuery(searchParams.get('search') || '');
+  }, [searchParams]);
 
   useEffect(() => {
     const onRoleChanged = () => setRole(getCurrentUserRole());
@@ -195,6 +207,27 @@ export default function Assets() {
     toast.success(`Exported ${selected.length} selected assets`);
   };
 
+  const handleBulkImportComplete = () => {
+    setBulkImportOpen(false);
+    // Assets will auto-refresh via the listener when the import completes
+  };
+
+  const handleBulkAssignOpen = () => {
+    const selected = assets.filter((a) => selectedIds.includes(a.id));
+    if (selected.length === 0) {
+      toast.error('Please select assets to assign');
+      return;
+    }
+    setSelectedAsset(null); // Clear detail view
+    setBulkAssignOpen(true);
+  };
+
+  const handleBulkAssignComplete = () => {
+    setBulkAssignOpen(false);
+    setSelectedIds([]); // Clear selection
+    // Assignments will auto-refresh via the listener when the assignment completes
+  };
+
   const handleExportCSV = () => {
     exportToCSV(filteredAssets);
     toast.success(`Exported ${filteredAssets.length} assets as CSV`);
@@ -209,7 +242,7 @@ export default function Assets() {
     <AppLayout>
       <div className="space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between animate-fade-in">
+        <div className="flex flex-col gap-4 animate-fade-in lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-primary/70 shadow-lg shadow-primary/20">
               <Package className="h-5 w-5 text-primary-foreground" />
@@ -221,15 +254,25 @@ export default function Assets() {
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={() => setScannerOpen(true)} className="gap-2">
-              <ScanLine className="h-4 w-4" />
-              Scan QR
-            </Button>
-            <Button onClick={handleAddAsset} className="shadow-lg shadow-primary/20 transition-all duration-300 hover:shadow-xl hover:shadow-primary/30">
-              <Plus className="mr-2 h-4 w-4" />
-              Add Asset
-            </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="outline" onClick={() => setScannerOpen(true)} className="gap-2">
+                  <ScanLine className="h-4 w-4" />
+                  Scan QR
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Scan a QR code to find an asset quickly</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button onClick={handleAddAsset} className="shadow-lg shadow-primary/20 transition-all duration-300 hover:shadow-xl hover:shadow-primary/30">
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add Asset
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Create a new asset entry</TooltipContent>
+            </Tooltip>
           </div>
         </div>
 
@@ -251,6 +294,7 @@ export default function Assets() {
           onDelete={handleBulkDelete}
           onStatusChange={handleBulkStatus}
           onExport={handleBulkExport}
+          onBulkAssign={handleBulkAssignOpen}
           canDelete={canDelete}
         />
 
@@ -273,6 +317,15 @@ export default function Assets() {
         onOpenChange={setFormDialogOpen}
         asset={selectedAsset}
         onSubmit={handleFormSubmit}
+        onOpenBulkAssetForm={(values) => {
+          setFormDialogOpen(false);
+          setBulkAssetFormInitialValues(values as Record<string, unknown>);
+          setBulkAssetFormOpen(true);
+        }}
+        onOpenBulkImport={() => {
+          setFormDialogOpen(false);
+          setBulkImportOpen(true);
+        }}
       />
 
       <AssetDetailDialog
@@ -301,6 +354,29 @@ export default function Assets() {
         open={qrCodeOpen}
         onOpenChange={setQrCodeOpen}
         asset={selectedAsset}
+      />
+
+      <BulkImportDialog
+        open={bulkImportOpen}
+        onOpenChange={setBulkImportOpen}
+        onImportComplete={handleBulkImportComplete}
+        onOpenBulkAssetForm={() => {
+          setBulkImportOpen(false);
+          setBulkAssetFormOpen(true);
+        }}
+      />
+
+      <BulkAssetFormDialog
+        open={bulkAssetFormOpen}
+        onOpenChange={setBulkAssetFormOpen}
+        initialValues={bulkAssetFormInitialValues}
+      />
+
+      <BulkAssignDialog
+        open={bulkAssignOpen}
+        onOpenChange={setBulkAssignOpen}
+        selectedAssets={assets.filter((a) => selectedIds.includes(a.id))}
+        onAssignComplete={handleBulkAssignComplete}
       />
     </AppLayout>
   );

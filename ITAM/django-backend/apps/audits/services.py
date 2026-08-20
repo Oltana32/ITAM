@@ -18,8 +18,11 @@ def get_expected_assets(session: AuditSession) -> QuerySet[Asset]:
     )
     if session.location_id:
         qs = qs.filter(location_id=session.location_id)
-    if session.department:
-        qs = qs.filter(department__iexact=session.department.strip())
+    if getattr(session, "department_id", None):
+        # session.department is a FK to core.Department; compare by name
+        dept_name = session.department.name if session.department else None
+        if dept_name:
+            qs = qs.filter(department__iexact=dept_name.strip())
     if session.category:
         qs = qs.filter(category=session.category)
     return qs.order_by("tag")

@@ -6,11 +6,13 @@ from django.test import TestCase
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
+from rest_framework.test import APIClient
 from apps.assets.models import Asset
 from apps.assignments.models import Assignment
 from apps.core.constants import AssetStatus
 from apps.manufacturers.models import Manufacturer
 from apps.locations.models import Location
+from apps.maintenance.models import MaintenanceRecord
 
 
 User = get_user_model()
@@ -213,3 +215,42 @@ class AssignmentLifecycleTests(TestCase):
         # Try to return again - should fail
         with self.assertRaises(ValidationError):
             self.assignment.return_asset(condition='good', returned_by=self.admin)
+
+    def test_return_by_tag_persists_inspection_and_creates_maintenance(self):
+        """Returning through the API should save inspection details and create maintenance when requested."""
+        client = APIClient()
+        client.force_authenticate(user=self.admin)
+
+        response = client.post(
+            '/api/assignments/return-by-tag/',
+            {
+                'asset_tag': self.asset.tag,
+                'inspection': {
+                    'inspectionDate': '2026-07-30',
+                    'inspectedBy': 'IT Staff',
+                    'overallCondition': 'damaged',
+                    'physicalCondition': ['Scratches', 'Broken Parts'],
+                    'functionalTest': 'failed',
+                    'accessoriesReturned': ['Charger', 'Mouse'],
+                    'missingAccessories': 'Keyboard missing',
+                    'requiresMaintenance': True,
+                    'maintenanceIssue': 'Battery replacement required',
+                    'dataWiped': 'yes',
+                    'finalAssetStatus': 'maintenance',
+                    'inspectionRemarks': 'Needs urgent repair',
+                    'employeeSignature': 'John Doe',
+                    'itStaffSignature': 'IT Staff',
+                    'returnedBy': 'John Doe',
+                    'receivedBy': 'IT Staff',
+                },
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assignment.refresh_from_db()
+        self.asset.refresh_from_db()
+        self.assertEqual(self.assignment.status, AssetStatus.RETURNED)
+        self.assertEqual(self.asset.status, AssetStatus.MAINTENANCE)
+        self.assertTrue(MaintenanceRecord.objects.filter(asset=self.asset).exists())
+        self.assertEqual(self.assignment.actual_return_date, self.assignment.actual_return_date)

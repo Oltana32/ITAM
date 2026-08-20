@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { BarChart3, Download, FileText, TrendingUp, PieChart, DollarSign, Shield, Calendar, Printer } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -9,12 +9,42 @@ import { Progress } from '@/components/ui/progress';
 import { toast } from 'sonner';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart as RechartsPie, Pie, Cell } from 'recharts';
 import { useAssets } from '@/hooks/useAssets';
+import { useAuditSessions } from '@/hooks/useAudits';
 import { authFetch } from '@/lib/auth';
+import { isActiveAssignmentStatus } from '@/types/asset';
 
 const CHART_COLORS = [
   'hsl(43, 80%, 45%)', 'hsl(150, 50%, 35%)', 'hsl(25, 90%, 50%)',
   'hsl(0, 65%, 45%)', 'hsl(280, 60%, 50%)', 'hsl(200, 60%, 45%)',
 ];
+
+function normalizeStatus(value?: string) {
+  return String(value ?? '').trim().toLowerCase().replace(/\s+/g, '-');
+}
+
+function isActiveAssetStatus(value?: string) {
+  const status = normalizeStatus(value);
+  return status === 'in-use' || status === 'assigned' || status === 'active';
+}
+
+async function fetchApiCollection(endpoint: string) {
+  const response = await authFetch(endpoint);
+  if (!response.ok) {
+    throw new Error(`Failed to load ${endpoint}`);
+  }
+
+  const payload = await response.json();
+  return Array.isArray(payload) ? payload : (payload.results ?? []);
+}
+
+function isExpiringLicense(license: Record<string, any>) {
+  if (!license?.expiry_date) return false;
+  const expiryDate = new Date(license.expiry_date);
+  if (Number.isNaN(expiryDate.getTime())) return false;
+
+  const diffDays = Math.ceil((expiryDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+  return diffDays <= 30 && diffDays >= 0;
+}
 
 const reports = [
   { id: '1', name: 'Asset Inventory Summary', description: 'Complete overview of all assets by category and status', icon: PieChart, lastGenerated: '2024-03-15', category: 'inventory' },
@@ -30,22 +60,87 @@ const reports = [
 export default function Reports() {
   const [tab, setTab] = useState('overview');
   const [generating, setGenerating] = useState<string | null>(null);
+  const [assignments, setAssignments] = useState<any[]>([]);
+  const [maintenanceRecords, setMaintenanceRecords] = useState<any[]>([]);
+  const [licenses, setLicenses] = useState<any[]>([]);
+  const [selectedAuditId, setSelectedAuditId] = useState<string>('');
   const { assets } = useAssets();
+  const { data: auditSessions = [] } = useAuditSessions();
 
-  // Compute real data
-  const categoryBreakdown = Object.entries(
-    assets.reduce((acc, a) => { acc[a.category] = (acc[a.category] || 0) + 1; return acc; }, {} as Record<string, number>)
-  ).map(([name, value]) => ({ name, value }));
+  useEffect(() => {
+    let isCancelled = false;
 
-  const deptBreakdown = Object.entries(
-    assets.reduce((acc, a) => { acc[a.department || 'Unassigned'] = (acc[a.department || 'Unassigned'] || 0) + 1; return acc; }, {} as Record<string, number>)
-  ).map(([name, value]) => ({ name, value }));
+    const loadDashboardData = async () => {
+      try {
+        const [assignmentData, maintenanceData, licenseData] = await Promise.all([
+          fetchApiCollection('/api/assignments/'),
+          fetchApiCollection('/api/maintenance/'),
+          fetchApiCollection('/api/licenses/'),
+        ]);
 
-  const deptCost = Object.entries(
-    assets.reduce((acc, a) => { acc[a.department || 'Unassigned'] = (acc[a.department || 'Unassigned'] || 0) + (a.purchaseCost || 0); return acc; }, {} as Record<string, number>)
-  ).map(([name, value]) => ({ name, value: Math.round(value / 1000) }));
+        if (!isCancelled) {
+          setAssignments(assignmentData);
+          setMaintenanceRecords(maintenanceData);
+          setLicenses(licenseData);
+        }
+      } catch {
+        if (!isCancelled) {
+          setAssignments([]);
+          setMaintenanceRecords([]);
+          setLicenses([]);
+        }
+      }
+    };
 
-  const totalValue = assets.reduce((s, a) => s + (a.purchaseCost || 0), 0);
+    loadDashboardData();
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
+  const categoryBreakdown = useMemo(
+    () => Object.entries(
+      assets.reduce((acc, asset) => {
+        const category = asset.category || 'other';
+        acc[category] = (acc[category] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>)
+    ).map(([name, value]) => ({ name, value })),
+    [assets]
+  );
+
+  const deptBreakdown = useMemo(
+    () => Object.entries(
+      assets.reduce((acc, asset) => {
+        const department = asset.department || 'Unassigned';
+        acc[department] = (acc[department] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>)
+    ).map(([name, value]) => ({ name, value })),
+    [assets]
+  );
+
+  const deptCost = useMemo(
+    () => Object.entries(
+      assets.reduce((acc, asset) => {
+        const department = asset.department || 'Unassigned';
+        const assetValue = asset.currentValue ?? asset.purchaseCost ?? 0;
+        acc[department] = (acc[department] || 0) + assetValue;
+        return acc;
+      }, {} as Record<string, number>)
+    ).map(([name, value]) => ({ name, value: Math.round(value / 1000) })),
+    [assets]
+  );
+
+  const totalValue = useMemo(
+    () => assets.reduce((sum, asset) => sum + (asset.currentValue ?? asset.purchaseCost ?? 0), 0),
+    [assets]
+  );
+  const activeAssets = useMemo(() => assets.filter((asset) => isActiveAssetStatus(asset.status)).length, [assets]);
+  const assignedAssets = useMemo(() => assets.filter((asset) => normalizeStatus(asset.status) === 'assigned' || normalizeStatus(asset.status) === 'in-use').length, [assets]);
+  const activeAssignments = useMemo(() => assignments.filter((assignment) => isActiveAssignmentStatus(String(assignment?.status ?? 'assigned'))).length, [assignments]);
+  const openMaintenance = useMemo(() => maintenanceRecords.filter((record) => !['completed', 'cancelled', 'closed'].includes(normalizeStatus(record?.status))).length, [maintenanceRecords]);
+  const expiringLicenses = useMemo(() => licenses.filter((license) => isExpiringLicense(license)).length, [licenses]);
 
   const handleCsvExport = async (reportType: string) => {
     setGenerating(reportType);
@@ -73,6 +168,25 @@ export default function Reports() {
       setGenerating(null);
     }
   };
+
+  const sortedAuditSessions = useMemo(
+    () => [...auditSessions].sort((a, b) => {
+      const aTime = new Date(a.audit_date ?? a.created_at ?? a.planned_date ?? 0).getTime();
+      const bTime = new Date(b.audit_date ?? b.created_at ?? b.planned_date ?? 0).getTime();
+      return bTime - aTime;
+    }),
+    [auditSessions],
+  );
+
+  useEffect(() => {
+    if (!sortedAuditSessions.length) {
+      setSelectedAuditId('');
+      return;
+    }
+    if (!selectedAuditId || !sortedAuditSessions.some((session) => String(session.id) === selectedAuditId)) {
+      setSelectedAuditId(String(sortedAuditSessions[0].id));
+    }
+  }, [selectedAuditId, sortedAuditSessions]);
 
   const handleDownload = (name: string) => {
     toast.success(`Report "${name}" generated and downloading...`);
@@ -105,26 +219,31 @@ export default function Reports() {
 
           <TabsContent value="overview" className="space-y-6 mt-6">
             {/* KPI Summary */}
-            <div className="grid gap-4 md:grid-cols-4">
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
               <Card className="card-hover"><CardContent className="pt-5">
                 <p className="text-xs text-muted-foreground">Total Assets</p>
                 <p className="text-2xl font-bold">{assets.length}</p>
-                <p className="text-xs text-[hsl(var(--status-active))]">+12% from last quarter</p>
+                <p className="text-xs text-[hsl(var(--status-active))]">Tracked inventory</p>
               </CardContent></Card>
               <Card className="card-hover"><CardContent className="pt-5">
                 <p className="text-xs text-muted-foreground">Total Value</p>
                 <p className="text-2xl font-bold">ETB {(totalValue / 1000000).toFixed(1)}M</p>
-                <p className="text-xs text-[hsl(var(--chart-3))]">Across all departments</p>
+                <p className="text-xs text-[hsl(var(--chart-3))]">Based on current asset value</p>
               </CardContent></Card>
               <Card className="card-hover"><CardContent className="pt-5">
-                <p className="text-xs text-muted-foreground">Utilization</p>
-                <p className="text-2xl font-bold">{assets.length ? Math.round((assets.filter(a => a.status === 'in-use').length / assets.length) * 100) : 0}%</p>
-                <Progress value={assets.length ? (assets.filter(a => a.status === 'in-use').length / assets.length) * 100 : 0} className="h-1.5 mt-2" />
+                <p className="text-xs text-muted-foreground">Active / Assigned</p>
+                <p className="text-2xl font-bold">{activeAssets}</p>
+                <p className="text-xs text-muted-foreground">{assignedAssets} assigned in active use</p>
               </CardContent></Card>
               <Card className="card-hover"><CardContent className="pt-5">
-                <p className="text-xs text-muted-foreground">Avg. Asset Value</p>
-                <p className="text-2xl font-bold">ETB {assets.length ? Math.round(totalValue / assets.length / 1000) : 0}K</p>
-                <p className="text-xs text-muted-foreground">Per asset</p>
+                <p className="text-xs text-muted-foreground">Active Assignments</p>
+                <p className="text-2xl font-bold">{activeAssignments}</p>
+                <p className="text-xs text-muted-foreground">Tracked from assignments</p>
+              </CardContent></Card>
+              <Card className="card-hover"><CardContent className="pt-5">
+                <p className="text-xs text-muted-foreground">Open Maintenance</p>
+                <p className="text-2xl font-bold">{openMaintenance}</p>
+                <p className="text-xs text-muted-foreground">{expiringLicenses} licenses expiring soon</p>
               </CardContent></Card>
             </div>
 
@@ -327,10 +446,81 @@ export default function Reports() {
                       </Button>
                     </div>
                   </CardContent>
-                </Card>
-              </div>
+                    </Card>
 
-              {/* Additional context */}
+                    {/* Audit Report (CSV) */}
+                    <Card className="card-hover">
+                      <CardHeader>
+                        <div className="flex items-center gap-3">
+                          <div className="p-2.5 rounded-xl bg-[hsl(var(--chart-5))]/10">
+                            <FileText className="h-5 w-5 text-[hsl(var(--chart-5))]" />
+                          </div>
+                          <div className="flex-1">
+                            <CardTitle className="text-sm">Audit Report</CardTitle>
+                            <CardDescription className="text-xs">Choose a recent audit session to export</CardDescription>
+                          </div>
+                        </div>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="space-y-3">
+                          <label className="text-xs text-muted-foreground block">Audit session</label>
+                          <select
+                            value={selectedAuditId}
+                            onChange={(e) => setSelectedAuditId(e.target.value)}
+                            className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none ring-0 focus:border-primary"
+                            disabled={!sortedAuditSessions.length || generating === 'audit'}
+                          >
+                            {!sortedAuditSessions.length && <option value="">No audit sessions available</option>}
+                            {sortedAuditSessions.map((session) => (
+                              <option key={session.id} value={String(session.id)}>
+                                {session.title}{session.audit_id ? ` (${session.audit_id})` : ` (#${session.id})`}
+                              </option>
+                            ))}
+                          </select>
+                          <Button
+                            size="sm"
+                            className="w-full gap-1.5"
+                            onClick={async () => {
+                              if (!selectedAuditId) {
+                                toast.error('Please select an audit session to export');
+                                return;
+                              }
+                              setGenerating('audit');
+                              try {
+                                const endpoint = `/api/reports/generate_audit_csv_report/?audit_id=${encodeURIComponent(selectedAuditId)}`;
+                                const resp = await authFetch(endpoint);
+                                if (!resp.ok) {
+                                  const txt = await resp.text();
+                                  throw new Error(txt || 'Failed to generate audit report');
+                                }
+                                const blob = await resp.blob();
+                                const url = window.URL.createObjectURL(blob);
+                                const a = document.createElement('a');
+                                a.href = url;
+                                a.download = `audit-${selectedAuditId}.csv`;
+                                document.body.appendChild(a);
+                                a.click();
+                                window.URL.revokeObjectURL(url);
+                                document.body.removeChild(a);
+                                toast.success('Audit report exported');
+                              } catch (err) {
+                                toast.error(err instanceof Error ? err.message : 'Failed to export audit report');
+                              } finally {
+                                setGenerating(null);
+                              }
+                            }}
+                            disabled={generating === 'audit' || !selectedAuditId}
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                            {generating === 'audit' ? 'Generating...' : 'Export as CSV'}
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                  </div>
+
+                  {/* Additional context */}
               <Card className="bg-muted/50 border-muted">
                 <CardContent className="pt-6">
                   <div className="space-y-2">
@@ -344,6 +534,8 @@ export default function Reports() {
                   </div>
                 </CardContent>
               </Card>
+
+              
             </div>
           </TabsContent>
         </Tabs>

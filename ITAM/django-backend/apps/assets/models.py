@@ -217,13 +217,28 @@ class Asset(models.Model):
         from datetime import date
         from decimal import Decimal
         
-        if not self.purchase_cost or not self.purchase_date or not self.useful_life_years:
+        # If useful life not provided, derive from category defaults
+        category_defaults = {
+            "laptop": 10,
+            "desktop": 10,
+            "monitor": 10,
+            "phone": 3,
+            "tablet": 3,
+            "equipment": 7,  # printers, other IT equipment
+            "network": 5,
+            "server": 7,
+            "other": 7,
+        }
+
+        useful_life = self.useful_life_years or category_defaults.get(self.category, 7)
+
+        if not self.purchase_cost or not self.purchase_date or not useful_life:
             return None
         
         # Calculate months in use
         today = date.today()
         months_in_use = (today.year - self.purchase_date.year) * 12 + (today.month - self.purchase_date.month)
-        months_useful_life = self.useful_life_years * 12
+        months_useful_life = useful_life * 12
         
         if months_useful_life <= 0:
             return None
@@ -282,7 +297,14 @@ class AssetStatusHistory(models.Model):
     asset = models.ForeignKey(
         Asset,
         related_name="status_history",
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+    )
+    asset_tag = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="Asset tag at the time of history entry",
     )
     change_type = models.CharField(
         max_length=20,
@@ -311,8 +333,9 @@ class AssetStatusHistory(models.Model):
         verbose_name_plural = "Asset Status Histories"
 
     def __str__(self) -> str:
+        asset_identifier = self.asset.tag if self.asset else self.asset_tag or "Unknown Asset"
         if self.change_type == AssetChangeType.STATUS:
-            return f"{self.asset.tag}: {self.from_status} → {self.to_status}"
+            return f"{asset_identifier}: {self.from_status} → {self.to_status}"
         if self.field_name:
-            return f"{self.asset.tag}: {self.field_name} changed"
-        return f"{self.asset.tag}: {self.get_change_type_display()}"
+            return f"{asset_identifier}: {self.field_name} changed"
+        return f"{asset_identifier}: {self.get_change_type_display()}"

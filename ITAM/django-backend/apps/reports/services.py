@@ -25,18 +25,21 @@ def _write_csv(headers: list[str], rows: list[list]) -> io.BytesIO:
 
 def generate_asset_report() -> io.BytesIO:
     """Generate Asset Report: Asset Tag, Asset Name, Category, Status, Location."""
-    headers = ["Asset Tag", "Asset Name", "Category", "Status", "Location"]
+    headers = ["Asset Tag", "Asset Name", "Category", "Status", "Location", "Purchase Cost", "Depreciated Amount", "Current Value"]
     assets = Asset.objects.select_related("location").all().order_by("tag")
-    rows = [
-        [
+    rows = []
+    for asset in assets:
+        depr = asset.calculate_depreciation() or {}
+        rows.append([
             asset.tag,
             asset.name,
             asset.get_category_display(),
             asset.get_status_display(),
             asset.location.name,
-        ]
-        for asset in assets
-    ]
+            getattr(asset.purchase_cost, 'quantize', lambda x: asset.purchase_cost) if asset.purchase_cost is not None else '',
+            depr.get('depreciated_value', ''),
+            depr.get('current_value', ''),
+        ])
     return _write_csv(headers, rows)
 
 
@@ -104,6 +107,7 @@ def generate_license_report() -> io.BytesIO:
         "Available Seats",
         "Expiry Date",
         "Status",
+        "Annual Cost",
     ]
     licenses = SoftwareLicense.objects.all().order_by("software_name")
     today = timezone.now().date()
@@ -128,6 +132,7 @@ def generate_license_report() -> io.BytesIO:
             license.available_seats,
             license.expiry_date,
             status,
+            license.annual_cost,
         ])
 
     return _write_csv(headers, rows)
@@ -178,6 +183,142 @@ def generate_status_history_report() -> io.BytesIO:
             role,
             entry.changed_at.strftime("%Y-%m-%d %H:%M:%S"),
             entry.reason,
+        ])
+
+    return _write_csv(headers, rows)
+
+
+def generate_audit_report(audit_id: int) -> io.BytesIO:
+    """Generate an Excel (.xlsx) report for a specific audit session.
+
+    Sheet1: Summary
+    Sheet2: Findings (one row per audited asset)
+    """
+    from openpyxl import Workbook
+    from openpyxl.utils import get_column_letter
+    from apps.audits.models import AuditSession
+
+    session = AuditSession.objects.filter(pk=audit_id).prefetch_related('findings__asset', 'findings__auditor').first()
+    if not session:
+        raise ValueError(f"Audit session with id={audit_id} not found")
+
+    wb = Workbook()
+    # Summary sheet
+    ws = wb.active
+    ws.title = "Summary"
+    summary_rows = [
+        ("Audit ID", session.audit_id),
+        ("Title", session.title),
+        ("Type", session.get_audit_type_display()),
+        ("Status", session.get_status_display()),
+        ("Lead Auditor", str(session.lead_auditor) if session.lead_auditor else ""),
+        ("Planned Date", str(session.planned_date)),
+        ("Audit Date", str(session.audit_date or "")),
+        ("Location", str(session.location) if session.location else ""),
+        ("Department", str(session.department) if session.department else ""),
+        ("Total Expected", session.total_assets_audited),
+        ("Total Found", session.assets_found),
+        ("Total Missing", session.assets_not_found),
+        ("Assets With Issues", session.assets_with_issues),
+        ("Created At", session.created_at.strftime("%Y-%m-%d %H:%M:%S") if session.created_at else ""),
+    ]
+
+    for r_idx, (k, v) in enumerate(summary_rows, start=1):
+        ws.cell(row=r_idx, column=1, value=k)
+        ws.cell(row=r_idx, column=2, value=v)
+
+    # Findings sheet
+    ws2 = wb.create_sheet(title="Findings")
+    headers = [
+        "Asset Tag",
+        "Asset Name",
+        "Expected Status",
+        "Finding Status",
+        "Result",
+        "Auditor",
+        "Verified At",
+        "Current Location",
+        "Current Condition",
+        "Notes",
+        "Verification JSON",
+    ]
+    for c_idx, h in enumerate(headers, start=1):
+        ws2.cell(row=1, column=c_idx, value=h)
+
+    for r_idx, finding in enumerate(session.findings.all().order_by('-verified_at'), start=2):
+        asset = getattr(finding, 'asset', None)
+        ws2.cell(row=r_idx, column=1, value=getattr(asset, 'tag', ''))
+        ws2.cell(row=r_idx, column=2, value=getattr(asset, 'name', ''))
+        # expected status is not tracked on session; leave blank or map from asset
+        ws2.cell(row=r_idx, column=3, value='')
+        ws2.cell(row=r_idx, column=4, value=finding.get_status_display())
+        ws2.cell(row=r_idx, column=5, value=finding.result_status)
+        ws2.cell(row=r_idx, column=6, value=str(finding.auditor) if finding.auditor else '')
+        ws2.cell(row=r_idx, column=7, value=finding.verified_at.strftime("%Y-%m-%d %H:%M:%S") if finding.verified_at else '')
+        ws2.cell(row=r_idx, column=8, value=str(finding.current_location) if finding.current_location else '')
+        ws2.cell(row=r_idx, column=9, value=finding.current_condition)
+        ws2.cell(row=r_idx, column=10, value=finding.notes)
+        # verification as compact JSON string
+        try:
+            import json
+
+            verification_str = json.dumps(finding.verification or {})
+        except Exception:
+            verification_str = str(finding.verification or "")
+        ws2.cell(row=r_idx, column=11, value=verification_str)
+
+    # Auto-adjust column widths for findings sheet
+    for i, column_cells in enumerate(ws2.columns, start=1):
+        length = max((len(str(cell.value)) if cell.value is not None else 0) for cell in column_cells)
+        ws2.column_dimensions[get_column_letter(i)].width = min(max(length + 2, 10), 60)
+
+    # Save workbook to BytesIO
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return output
+
+
+def generate_audit_csv_report(audit_id: int) -> io.BytesIO:
+    """Generate a CSV report for a specific audit session.
+
+    Columns: Asset Tag, Asset Name, Finding Status, Result, Auditor, Verified At,
+    Current Location, Current Condition, Notes, Verification JSON
+    """
+    from apps.audits.models import AuditSession
+    import json
+
+    session = AuditSession.objects.filter(pk=audit_id).prefetch_related('findings__asset', 'findings__auditor').first()
+    if not session:
+        raise ValueError(f"Audit session with id={audit_id} not found")
+
+    headers = [
+        "Asset Tag",
+        "Asset Name",
+        "Finding Status",
+        "Result",
+        "Auditor",
+        "Verified At",
+        "Current Location",
+        "Current Condition",
+        "Notes",
+        "Verification JSON",
+    ]
+
+    rows: list[list] = []
+    for finding in session.findings.all().order_by('-verified_at'):
+        asset = getattr(finding, 'asset', None)
+        rows.append([
+            getattr(asset, 'tag', ''),
+            getattr(asset, 'name', ''),
+            finding.get_status_display(),
+            finding.result_status,
+            str(finding.auditor) if finding.auditor else '',
+            finding.verified_at.strftime("%Y-%m-%d %H:%M:%S") if finding.verified_at else '',
+            str(finding.current_location) if finding.current_location else '',
+            finding.current_condition,
+            finding.notes,
+            json.dumps(finding.verification or {}),
         ])
 
     return _write_csv(headers, rows)

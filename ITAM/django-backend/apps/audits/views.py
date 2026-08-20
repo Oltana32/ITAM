@@ -28,7 +28,7 @@ class AuditSessionViewSet(viewsets.ModelViewSet):
     serializer_class = AuditSessionSerializer
     permission_classes = [IsAuthenticated, IsAuditor]
     filterset_fields = ["status", "audit_date", "location", "category", "department"]
-    search_fields = ["title", "description", "department"]
+    search_fields = ["title", "description", "department__name"]
     ordering_fields = ["audit_date", "planned_date", "created_at"]
     ordering = ["-audit_date", "-planned_date"]
 
@@ -88,7 +88,35 @@ class AuditSessionViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_409_CONFLICT,
             )
 
-        finding = record_scan(session, asset, request.user)
+        # Allow richer verification payloads from the scanner UI
+        status_val = request.data.get("status") or AuditFinding.Status.FOUND
+        notes = request.data.get("notes") or "Verified via QR scan"
+        current_condition = request.data.get("current_condition") or ""
+        current_location_id = request.data.get("current_location") or None
+        evidence_notes = request.data.get("evidence_notes") or ""
+        verification = {
+            "tag_match": bool(request.data.get("tag_match", True)),
+            "serial_match": bool(request.data.get("serial_match", True)),
+            "assigned_user_correct": bool(request.data.get("assigned_user_correct", True)),
+            "location_correct": bool(request.data.get("location_correct", True)),
+        }
+
+        finding = AuditFinding.objects.create(
+            audit_session=session,
+            asset=asset,
+            status=status_val,
+            notes=notes,
+            auditor=request.user,
+            current_condition=current_condition,
+            current_location_id=current_location_id,
+            evidence_notes=evidence_notes,
+            verification=verification,
+        )
+
+        asset.last_audit_at = timezone.now()
+        asset.save(update_fields=["last_audit_at", "updated_at"])
+        _refresh_session_counts(session)
+
         return Response(AuditFindingSerializer(finding).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"])
@@ -176,7 +204,7 @@ class AuditSessionViewSet(viewsets.ModelViewSet):
         buffer = io.BytesIO()
         wb.save(buffer)
         buffer.seek(0)
-        filename = f"audit_{session.id}_{session.title[:30].replace(' ', '_')}.xlsx"
+        filename = f"{session.audit_id or f'audit_{session.id}'}_{session.title[:30].replace(' ', '_')}.xlsx"
         return FileResponse(
             buffer,
             as_attachment=True,
@@ -197,7 +225,7 @@ class AuditSessionViewSet(viewsets.ModelViewSet):
             for r in results["assets"]
         )
         html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
-<title>Audit Report - {session.title}</title>
+    <title>Audit Report - {session.audit_id or session.title}</title>
 <style>
 body{{font-family:Arial,sans-serif;padding:24px;color:#111}}
 h1{{font-size:20px}} table{{width:100%;border-collapse:collapse;margin-top:16px}}
@@ -206,9 +234,9 @@ th{{background:#f0f0f0}} .stats{{display:flex;gap:24px;margin:16px 0}}
 .stat{{padding:12px 16px;border:1px solid #ddd;border-radius:8px}}
 </style></head><body>
 <h1>Asset Audit Report</h1>
-<p><strong>Session:</strong> {session.title} | <strong>Status:</strong> {session.get_status_display()}</p>
-<p><strong>Location:</strong> {session.location.name if session.location else 'All'} |
-<strong>Department:</strong> {session.department or 'All'}</p>
+<p><strong>Audit ID:</strong> {session.audit_id or ''} | <strong>Session:</strong> {session.title} | <strong>Status:</strong> {session.get_status_display()}</p>
+<p><strong>Type:</strong> {session.get_audit_type_display() if hasattr(session, 'get_audit_type_display') else session.audit_type} | <strong>Location:</strong> {session.location.name if session.location else 'All'} |
+<strong>Department:</strong> {session.department.name if session.department else 'All'} | <strong>Lead:</strong> {session.lead_auditor.email if session.lead_auditor else '—'}</p>
 <div class="stats">
 <div class="stat"><strong>Expected:</strong> {results['expected']}</div>
 <div class="stat"><strong>Verified:</strong> {results['verified']}</div>

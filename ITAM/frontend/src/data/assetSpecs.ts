@@ -179,6 +179,23 @@ export const CATEGORY_SPECS: Record<string, CategorySpecs> = {
       },
     },
   },
+  equipment: {
+    label: 'Equipment / Printer Specifications',
+    fields: {
+      printer_type: {
+        label: 'Printer Type',
+        type: 'select',
+        options: PRINTER_TYPE_OPTIONS,
+        required: false,
+      },
+      connectivity: {
+        label: 'Connectivity',
+        type: 'select',
+        options: CONNECTIVITY_OPTIONS,
+        required: false,
+      },
+    },
+  },
   monitor: {
     label: 'Monitor Specifications',
     fields: {
@@ -192,6 +209,52 @@ export const CATEGORY_SPECS: Record<string, CategorySpecs> = {
         label: 'Resolution',
         type: 'select',
         options: RESOLUTION_OPTIONS,
+        required: false,
+      },
+    },
+  },
+  phone: {
+    label: 'Phone Specifications',
+    fields: {
+      storage: {
+        label: 'Storage',
+        type: 'select',
+        options: STORAGE_OPTIONS,
+        required: false,
+      },
+      os: {
+        label: 'Operating System',
+        type: 'select',
+        options: OS_OPTIONS,
+        required: false,
+      },
+      screen_size: {
+        label: 'Screen Size',
+        type: 'select',
+        options: SCREEN_SIZE_OPTIONS,
+        required: false,
+      },
+    },
+  },
+  tablet: {
+    label: 'Tablet Specifications',
+    fields: {
+      storage: {
+        label: 'Storage',
+        type: 'select',
+        options: STORAGE_OPTIONS,
+        required: false,
+      },
+      os: {
+        label: 'Operating System',
+        type: 'select',
+        options: OS_OPTIONS,
+        required: false,
+      },
+      screen_size: {
+        label: 'Screen Size',
+        type: 'select',
+        options: SCREEN_SIZE_OPTIONS,
         required: false,
       },
     },
@@ -226,10 +289,12 @@ export function getSpecsForCategory(category: string): CategorySpecs | undefined
 }
 
 export function hasSpecs(category: AssetCategory): boolean {
-  return category === 'laptop' || 
-         category === 'desktop' || 
-         category === 'server' || 
-         category === 'monitor' || 
+  return category === 'laptop' ||
+         category === 'desktop' ||
+         category === 'server' ||
+         category === 'monitor' ||
          category === 'network' ||
-         category === 'equipment'; // equipment covers printers
+         category === 'equipment' ||
+         category === 'phone' ||
+         category === 'tablet';
 }

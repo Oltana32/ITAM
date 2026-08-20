@@ -7,7 +7,15 @@ class SoftwareLicenseSerializer(serializers.ModelSerializer):
     assigned_to_email = serializers.EmailField(source="assigned_to.email", read_only=True, required=False)
     vendor_display = serializers.CharField(source="get_vendor_display", read_only=True)
     allocated_seats = serializers.IntegerField(read_only=True)
+    used_seats = serializers.IntegerField(read_only=True)
+    active_users = serializers.IntegerField(required=False)
     available_seats = serializers.IntegerField(read_only=True)
+    annual_cost = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    total_annual_cost = serializers.DecimalField(source="annual_cost", max_digits=12, decimal_places=2, read_only=True)
+    cost_per_seat = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    utilization_percentage = serializers.IntegerField(read_only=True)
+    status = serializers.CharField(read_only=True)
+    cost_currency = serializers.CharField(required=False)
 
     class Meta:
         model = SoftwareLicense
@@ -21,7 +29,15 @@ class SoftwareLicenseSerializer(serializers.ModelSerializer):
             "vendor",
             "vendor_display",
             "allocated_seats",
+            "used_seats",
+            "active_users",
             "available_seats",
+            "utilization_percentage",
+            "status",
+            "annual_cost",
+            "total_annual_cost",
+            "cost_per_seat",
+            "cost_currency",
             "notes",
             "created_at",
             "updated_at",

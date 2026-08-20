@@ -90,16 +90,34 @@ export function useAuditMutations() {
   const createSession = useMutation({
     mutationFn: async (payload: {
       title: string;
-      department: string;
+      department?: string | number | null;
       location: number | null;
       status: AuditSessionStatus;
       planned_date: string;
       description?: string;
+      audit_type?: string;
+      lead_auditor?: number | null;
     }) => {
+      const bodyPayload: Record<string, unknown> = {
+        title: payload.title,
+        location: payload.location,
+        status: payload.status,
+        planned_date: payload.planned_date,
+      };
+      if (payload.audit_type) bodyPayload.audit_type = payload.audit_type;
+      if (typeof payload.lead_auditor === 'number') bodyPayload.lead_auditor = payload.lead_auditor;
+      // prefer department_id when numeric id is provided
+      if (typeof payload.department === 'number') {
+        bodyPayload.department_id = payload.department;
+      } else if (typeof payload.department === 'string' && payload.department.trim()) {
+        // fallback for older backends: include department string
+        bodyPayload.department = payload.department.trim();
+      }
+
       const res = await authFetch('/api/audit-sessions/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(bodyPayload),
       });
       if (!res.ok) throw new Error(await parseError(res, 'Failed to create audit'));
       return res.json() as Promise<AuditSession>;
@@ -123,11 +141,18 @@ export function useAuditMutations() {
   });
 
   const scanAsset = useMutation({
-    mutationFn: async ({ sessionId, assetTag }: { sessionId: number; assetTag: string }) => {
+    mutationFn: async (data: {
+      sessionId: number;
+      asset_tag: string;
+      verification?: Record<string, boolean>;
+      current_condition?: string;
+      notes?: string;
+    }) => {
+      const { sessionId, asset_tag, verification, current_condition, notes } = data;
       const res = await authFetch(`/api/audit-sessions/${sessionId}/scan/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ asset_tag: assetTag }),
+        body: JSON.stringify({ asset_tag, verification, current_condition, notes }),
       });
       if (res.status === 409) {
         const payload = await res.json();
@@ -171,11 +196,13 @@ export async function downloadAuditExport(sessionId: number, format: 'xlsx' | 'p
   document.body.removeChild(a);
 }
 
-export async function returnAssetByTag(assetTag: string) {
+export async function returnAssetByTag(input: string | { assetTag: string; inspection?: Record<string, unknown> }) {
+  const assetTag = typeof input === 'string' ? input : input.assetTag;
+  const inspection = typeof input === 'string' ? undefined : input.inspection;
   const res = await authFetch('/api/assignments/return-by-tag/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ asset_tag: assetTag }),
+    body: JSON.stringify({ asset_tag: assetTag, inspection }),
   });
   if (!res.ok) throw new Error(await parseError(res, 'Return failed'));
   return res.json();

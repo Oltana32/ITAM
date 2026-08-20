@@ -118,3 +118,19 @@ class AuditLogMixin(models.Model):
             reason=reason,
             ip_address=cls._get_ip_address(request),
         )
+
+
+class Department(models.Model):
+    """Registered departments for the organisation."""
+
+    name = models.CharField(max_length=255, unique=True, db_index=True)
+    code = models.CharField(max_length=64, blank=True, db_index=True)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["name"]
+        verbose_name = "Department"
+        verbose_name_plural = "Departments"
+
+    def __str__(self) -> str:
+        return f"{self.name}" if not self.code else f"{self.name} ({self.code})"

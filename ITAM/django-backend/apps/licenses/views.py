@@ -1,7 +1,9 @@
 from rest_framework import viewsets
+from django.utils import timezone
 
 from config.permissions import IsITStaffOrAdmin, IsITStaffOrAdminOrReadOnly
 
+from apps.notifications.services import notify_license_expiry
 from .models import LicenseAssignment, SoftwareLicense
 from .serializers import LicenseAssignmentSerializer, SoftwareLicenseSerializer
 
@@ -17,6 +19,22 @@ class LicenseViewSet(viewsets.ModelViewSet):
         if self.action in ("create", "update", "partial_update", "destroy"):
             return [IsITStaffOrAdmin()]
         return super().get_permissions()
+
+    def _notify_expiring_licenses(self, queryset):
+        for license_obj in queryset:
+            notify_license_expiry(license_obj)
+
+    def list(self, request, *args, **kwargs):
+        self._notify_expiring_licenses(self.filter_queryset(self.get_queryset()))
+        return super().list(request, *args, **kwargs)
+
+    def perform_create(self, serializer):
+        license_obj = serializer.save()
+        notify_license_expiry(license_obj)
+
+    def perform_update(self, serializer):
+        license_obj = serializer.save()
+        notify_license_expiry(license_obj)
 
 
 class LicenseAssignmentViewSet(viewsets.ModelViewSet):

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Bell, AlertTriangle, Info, CheckCircle, Clock, Trash2, CheckCheck, Filter, Loader } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -6,20 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import { toast } from 'sonner';
-import { authFetch } from '@/lib/auth';
-import { useEffect } from 'react';
-
-interface Notification {
-  id: string;
-  notification_type: string;
-  message: string;
-  read_status: boolean;
-  related_asset_id: number | null;
-  related_assignment_id: number | null;
-  related_maintenance_id: number | null;
-  created_at: string;
-}
+import { useNotifications } from '@/hooks/useNotifications';
 
 const notificationTypeConfig: Record<string, { icon: React.ElementType; color: string; label: string }> = {
   asset_assigned: { icon: Info, color: 'text-primary', label: 'Asset Assigned' },
@@ -38,67 +25,17 @@ const typeConfig: Record<string, { icon: React.ElementType; color: string }> = {
 };
 
 export default function Notifications() {
-  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [typeFilter, setTypeFilter] = useState('all');
-  const [loading, setLoading] = useState(true);
+  const { notifications, loading, markAllRead, clearAll, markRead, deleteNotification } = useNotifications();
 
-  useEffect(() => {
-    const loadNotifications = async () => {
-      try {
-        const response = await authFetch('/api/notifications/');
-        if (!response.ok) {
-          throw new Error('Failed to load notifications');
-        }
-        const data = await response.json();
-        const notificationsList = Array.isArray(data) ? data : data.results || [];
-        setNotifications(notificationsList);
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : 'Failed to load notifications');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    void loadNotifications();
-  }, []);
-
-  const filtered = notifications.filter(n => typeFilter === 'all' || n.notification_type === typeFilter);
-  const unread = notifications.filter(n => !n.read_status).length;
-
-  const markAllRead = async () => {
-    try {
-      // Optimistic update
-      setNotifications(prev => prev.map(n => ({ ...n, read_status: true })));
-      toast.success('All notifications marked as read');
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to mark all as read');
-    }
-  };
-
-  const markRead = async (id: string) => {
-    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read_status: true } : n));
-  };
-
-  const deleteNotif = async (id: string) => {
-    setNotifications(prev => prev.filter(n => n.id !== id));
-    toast.info('Notification dismissed');
-  };
-
-  const clearAll = async () => {
-    try {
-      const response = await authFetch('/api/notifications/clear_all/', {
-        method: 'POST',
-      });
-      if (!response.ok) {
-        throw new Error('Failed to clear notifications');
-      }
-      const result = await response.json();
-      setNotifications([]);
-      toast.success(`${result.deleted || 'All'} notifications cleared`);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to clear notifications');
-    }
-  };
+  const filtered = useMemo(
+    () => notifications.filter((n) => typeFilter === 'all' || n.notification_type === typeFilter),
+    [notifications, typeFilter]
+  );
+  const unread = useMemo(
+    () => notifications.filter((n) => !n.read_status).length,
+    [notifications]
+  );
 
   return (
     <AppLayout>
@@ -183,13 +120,13 @@ export default function Notifications() {
                         <div className="flex items-center gap-2">
                           <p className={cn('text-sm font-medium', !notif.read_status && 'font-semibold')}>{cfg.label}</p>
                           {!notif.read_status && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}
-                          <Badge variant="outline" className="text-[9px] ml-auto capitalize">{notif.notification_type.replace('_', ' ')}</Badge>
+                          <Badge variant="outline" className="text-[9px] ml-auto capitalize">{notif.notification_type.replace(/_/g, ' ')}</Badge>
                         </div>
                         <p className="text-xs text-muted-foreground mt-0.5">{notif.message}</p>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         <span className="text-[11px] text-muted-foreground flex items-center gap-1"><Clock className="h-3 w-3" />{timeAgo}</span>
-                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => deleteNotif(notif.id)}>
+                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => deleteNotification(notif.id)}>
                           <Trash2 className="h-3 w-3 text-muted-foreground" />
                         </Button>
                       </div>

@@ -19,7 +19,7 @@ DEBUG = os.environ.get("DJANGO_DEBUG", "false").lower() in ("1", "true", "yes")
 
 ALLOWED_HOSTS = [
     h.strip()
-    for h in os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+    for h in os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,testserver").split(",")
     if h.strip()
 ]
 
@@ -33,6 +33,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "rest_framework_simplejwt",
     "corsheaders",
+    "apps.core",
     "apps.users",
     "apps.locations",
     "apps.manufacturers",

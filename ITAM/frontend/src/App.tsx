@@ -37,6 +37,15 @@ function ProtectedRoute({ path, children }: { path: string; children: JSX.Elemen
   return children;
 }
 
+function LoginRoute() {
+  if (isAuthenticated()) {
+    const role: UserRole = getCurrentUserRole();
+    return <Navigate to={getDefaultPath(role)} replace />;
+  }
+
+  return <Login />;
+}
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <ThemeProvider>
@@ -46,8 +55,9 @@ const App = () => (
         <BrowserRouter>
           <CommandPalette />
           <Routes>
-          <Route path="/login" element={<Login />} />
+          <Route path="/login" element={<LoginRoute />} />
           <Route path="/" element={<ProtectedRoute path="/"><Index /></ProtectedRoute>} />
+          <Route path="/dashboard" element={<ProtectedRoute path="/dashboard"><Index /></ProtectedRoute>} />
           <Route path="/assets" element={<ProtectedRoute path="/assets"><Assets /></ProtectedRoute>} />
           <Route path="/users" element={<ProtectedRoute path="/users"><Users /></ProtectedRoute>} />
           <Route path="/locations" element={<ProtectedRoute path="/locations"><Locations /></ProtectedRoute>} />

@@ -204,6 +204,23 @@ CATEGORY_SPECS = {
             },
         },
     },
+    "equipment": {
+        "label": "Equipment / Printer Specifications",
+        "fields": {
+            "printer_type": {
+                "label": "Printer Type",
+                "type": "select",
+                "options": PRINTER_TYPE_OPTIONS,
+                "required": False,
+            },
+            "connectivity": {
+                "label": "Connectivity",
+                "type": "select",
+                "options": CONNECTIVITY_OPTIONS,
+                "required": False,
+            },
+        },
+    },
     "monitor": {
         "label": "Monitor Specifications",
         "fields": {
@@ -217,6 +234,52 @@ CATEGORY_SPECS = {
                 "label": "Resolution",
                 "type": "select",
                 "options": RESOLUTION_OPTIONS,
+                "required": False,
+            },
+        },
+    },
+    "phone": {
+        "label": "Phone Specifications",
+        "fields": {
+            "storage": {
+                "label": "Storage",
+                "type": "select",
+                "options": STORAGE_OPTIONS,
+                "required": False,
+            },
+            "os": {
+                "label": "Operating System",
+                "type": "select",
+                "options": OS_OPTIONS,
+                "required": False,
+            },
+            "screen_size": {
+                "label": "Screen Size",
+                "type": "select",
+                "options": SCREEN_SIZE_OPTIONS,
+                "required": False,
+            },
+        },
+    },
+    "tablet": {
+        "label": "Tablet Specifications",
+        "fields": {
+            "storage": {
+                "label": "Storage",
+                "type": "select",
+                "options": STORAGE_OPTIONS,
+                "required": False,
+            },
+            "os": {
+                "label": "Operating System",
+                "type": "select",
+                "options": OS_OPTIONS,
+                "required": False,
+            },
+            "screen_size": {
+                "label": "Screen Size",
+                "type": "select",
+                "options": SCREEN_SIZE_OPTIONS,
                 "required": False,
             },
         },

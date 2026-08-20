@@ -99,6 +99,7 @@ export function useAssets() {
       model: raw.model || '',
       serialNumber: raw.serial_number || '',
       notes: raw.notes || undefined,
+      currentValue: raw.depreciation?.current_value ?? raw.purchase_cost ?? undefined,
       lastAuditDate: raw.last_audit_at || undefined,
       // Normalize assigned_to which may be a string or a nested user object ({id,email})
       assignedTo: (() => {
@@ -179,6 +180,7 @@ export function useAssets() {
         location: locationId,
         model: data.model,
         serial_number: data.serialNumber,
+        specs: data.specs ?? {},
         notes: data.notes ?? '',
       }),
     });
@@ -222,6 +224,7 @@ export function useAssets() {
             }
           : {}),
         ...(data.department !== undefined ? { department: data.department } : {}),
+        ...(data.specs !== undefined ? { specs: data.specs ?? {} } : {}),
       }),
     });
     if (!response.ok) {

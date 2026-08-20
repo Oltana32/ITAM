@@ -35,6 +35,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 import { Asset, AssetCategory, AssetStatus, categoryLabels, statusLabels } from '@/types/asset';
 import { CATEGORY_SPECS, getSpecsForCategory } from '@/data/assetSpecs';
+import { getVisibleAssetStatusOptions } from '@/components/assets/bulkAssetFormUtils';
 
 const conditionLabels: Record<string, string> = {
   excellent: 'Excellent',
@@ -51,10 +52,12 @@ Object.values(CATEGORY_SPECS).forEach((categorySpecs) => {
   });
 });
 
+const visibleStatusValues = ['available', 'in-use', 'maintenance', 'retired', 'disposed', 'lost', 'damaged'] as const;
+
 const assetFormSchema = z.object({
   name: z.string().min(1, 'Name is required').max(100),
   category: z.enum(['laptop', 'desktop', 'monitor', 'server', 'phone', 'tablet', 'network', 'equipment', 'other']),
-  status: z.enum(['available', 'assigned', 'in-use', 'ready', 'maintenance', 'retired', 'disposed', 'lost', 'damaged']),
+  status: z.enum(visibleStatusValues),
   purchaseDate: z.date(),
   purchaseCost: z.string().optional(),
   warrantyExpiry: z.date().optional(),
@@ -74,9 +77,11 @@ interface AssetFormDialogProps {
   onOpenChange: (open: boolean) => void;
   asset?: Asset | null;
   onSubmit: (data: AssetFormValues) => Promise<void> | void;
+  onOpenBulkAssetForm?: (values: AssetFormValues) => void;
+  onOpenBulkImport?: (values: AssetFormValues) => void;
 }
 
-export function AssetFormDialog({ open, onOpenChange, asset, onSubmit }: AssetFormDialogProps) {
+export function AssetFormDialog({ open, onOpenChange, asset, onSubmit, onOpenBulkAssetForm, onOpenBulkImport }: AssetFormDialogProps) {
   const isEditing = !!asset;
   const [manufacturers, setManufacturers] = useState<string[]>([]);
   const [generatedTag, setGeneratedTag] = useState<string>('');
@@ -179,6 +184,21 @@ export function AssetFormDialog({ open, onOpenChange, asset, onSubmit }: AssetFo
           </DialogDescription>
         </DialogHeader>
 
+        {!isEditing && (
+          <div className="flex flex-wrap justify-end gap-2">
+            {onOpenBulkAssetForm && (
+              <Button type="button" variant="outline" onClick={() => onOpenBulkAssetForm(form.getValues())}>
+                Bulk asset entry
+              </Button>
+            )}
+            {onOpenBulkImport && (
+              <Button type="button" variant="outline" onClick={() => onOpenBulkImport(form.getValues())}>
+                Bulk import
+              </Button>
+            )}
+          </div>
+        )}
+
         <Form {...form}>
           <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
             <div className="grid grid-cols-2 gap-4">
@@ -246,7 +266,7 @@ export function AssetFormDialog({ open, onOpenChange, asset, onSubmit }: AssetFo
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        {Object.entries(statusLabels).map(([value, label]) => (
+                        {getVisibleAssetStatusOptions(statusLabels).map(([value, label]) => (
                           <SelectItem key={value} value={value}>
                             {label}
                           </SelectItem>
@@ -450,20 +470,22 @@ export function AssetFormDialog({ open, onOpenChange, asset, onSubmit }: AssetFo
                         <FormItem>
                           <FormLabel>{fieldConfig.label}</FormLabel>
                           {fieldConfig.type === 'select' && fieldConfig.options ? (
-                            <Select onValueChange={field.onChange} value={field.value || ''}>
+                            <>
                               <FormControl>
-                                <SelectTrigger>
-                                  <SelectValue placeholder={`Select ${fieldConfig.label.toLowerCase()}`} />
-                                </SelectTrigger>
+                                {/* Allow choosing from predefined options or typing a custom value via datalist */}
+                                <Input
+                                  list={`spec-${fieldKey}-list`}
+                                  placeholder={fieldConfig.placeholder || `Select or type ${fieldConfig.label.toLowerCase()}`}
+                                  value={field.value || ''}
+                                  onChange={(e) => field.onChange(e.target.value)}
+                                />
                               </FormControl>
-                              <SelectContent>
+                              <datalist id={`spec-${fieldKey}-list`}>
                                 {fieldConfig.options.map((option) => (
-                                  <SelectItem key={option} value={option}>
-                                    {option}
-                                  </SelectItem>
+                                  <option key={option} value={option} />
                                 ))}
-                              </SelectContent>
-                            </Select>
+                              </datalist>
+                            </>
                           ) : (
                             <FormControl>
                               <Input

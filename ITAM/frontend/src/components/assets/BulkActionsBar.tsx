@@ -1,9 +1,10 @@
-import { Trash2, X, Download, RotateCw } from 'lucide-react';
+import { Trash2, X, Download, RotateCw, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { AssetStatus, statusLabels } from '@/types/asset';
+import { getBulkAssetStatusOptions } from '@/components/assets/bulkAssetFormUtils';
 
 interface BulkActionsBarProps {
   count: number;
@@ -11,10 +12,11 @@ interface BulkActionsBarProps {
   onDelete: () => void;
   onStatusChange: (status: AssetStatus) => void;
   onExport: () => void;
+  onBulkAssign?: () => void;
   canDelete?: boolean;
 }
 
-export function BulkActionsBar({ count, onClear, onDelete, onStatusChange, onExport, canDelete = true }: BulkActionsBarProps) {
+export function BulkActionsBar({ count, onClear, onDelete, onStatusChange, onExport, onBulkAssign, canDelete = true }: BulkActionsBarProps) {
   if (count === 0) return null;
 
   return (
@@ -32,11 +34,16 @@ export function BulkActionsBar({ count, onClear, onDelete, onStatusChange, onExp
             <SelectValue placeholder="Change status…" />
           </SelectTrigger>
           <SelectContent>
-            {Object.entries(statusLabels).map(([v, l]) => (
+            {getBulkAssetStatusOptions(statusLabels).map(([v, l]) => (
               <SelectItem key={v} value={v}>{l}</SelectItem>
             ))}
           </SelectContent>
         </Select>
+        {onBulkAssign && (
+          <Button variant="outline" size="sm" onClick={onBulkAssign} className="h-8">
+            <Send className="mr-1.5 h-3.5 w-3.5" /> Assign
+          </Button>
+        )}
         <Button variant="outline" size="sm" onClick={onExport} className="h-8">
           <Download className="mr-1.5 h-3.5 w-3.5" /> Export
         </Button>
