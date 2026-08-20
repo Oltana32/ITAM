@@ -1,0 +1,15 @@
+.env
+db.sqlite3
+db.sqlite3.backup
+venv/
+env/
+.venv/
+node_modules/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.DS_Store
+.vscode/
+.idea/

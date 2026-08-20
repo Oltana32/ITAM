@@ -1,0 +1,31 @@
+# Render service manifest to deploy frontend (static) and Django backend (web)
+# Visit https://render.com/docs/render-yaml for details. Do NOT include secrets here —
+# set them in the Render dashboard as environment variables (SECRET_KEY, DATABASE_URL, etc.).
+
+services:
+  - type: web
+    name: django-backend
+    env: python
+    plan: free
+    buildCommand: pip install -r django-backend/requirements.txt
+    startCommand: gunicorn config.wsgi:application --bind 0.0.0.0:$PORT
+    root: django-backend
+    envVars:
+      - key: DJANGO_SECRET_KEY
+      - key: DJANGO_ALLOWED_HOSTS
+      - key: DATABASE_URL
+      - key: POSTGRES_DB
+      - key: POSTGRES_USER
+      - key: POSTGRES_PASSWORD
+      - key: POSTGRES_HOST
+      - key: POSTGRES_PORT
+    autoDeploy: true
+
+  - type: static
+    name: frontend
+    env: node
+    plan: free
+    buildCommand: cd frontend && npm ci && npm run build
+    publishPath: frontend/dist
+    root: .
+    autoDeploy: true
