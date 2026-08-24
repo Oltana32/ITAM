@@ -40,13 +40,16 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-6">
+    <div
+      className="min-h-screen flex items-center justify-center p-6 bg-cover bg-center"
+      style={{ backgroundImage: "url('/awash-login-bg.jpg')" }}
+    >
       <Card className="w-full max-w-md shadow-xl border-border/60">
         <CardHeader className="space-y-4">
           <div className="flex items-center gap-3">
             <img src={awashLogo} alt="Awash Wine" className="h-10 w-10 rounded-lg object-contain" />
             <div>
-              <CardTitle className="text-xl">Asset Buddy</CardTitle>
+              <CardTitle className="text-xl">IT Asset Managment</CardTitle>
               <p className="text-sm text-muted-foreground">Sign in to continue</p>
             </div>
           </div>
