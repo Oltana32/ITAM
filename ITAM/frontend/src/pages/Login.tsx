@@ -54,12 +54,18 @@ export default function Login() {
   };
 
   return (
-    <div className="relative h-screen w-screen overflow-hidden bg-[#F4EBD0]">
+    <div className="relative min-h-screen w-screen overflow-hidden bg-[#F4EBD0]">
       <img
         src="/awash-login-bg.png"
-        alt=""
+        alt="Awash login background"
         aria-hidden="true"
-        className="pointer-events-none absolute inset-0 h-full w-full select-none object-cover object-left"
+        loading="lazy"
+        className="pointer-events-none absolute inset-0 h-full w-full select-none object-cover object-center lg:object-left"
+      />
+      {/* subtle overlay to improve form contrast on small screens */}
+      <div
+        aria-hidden="true"
+        className="absolute inset-0 pointer-events-none bg-[linear-gradient(90deg,rgba(0,0,0,0.45),rgba(0,0,0,0.15))] lg:bg-[linear-gradient(90deg,rgba(0,0,0,0.0),rgba(0,0,0,0.0))]"
       />
       <div className="relative grid h-full grid-cols-1 lg:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]">
         {/* Left panel — background branding visible */}
