@@ -60,12 +60,12 @@ export default function Login() {
         alt="Awash login background"
         aria-hidden="true"
         loading="lazy"
-        className="pointer-events-none absolute inset-0 h-full w-full select-none object-cover object-center lg:object-left"
+        className="pointer-events-none absolute inset-0 h-full w-full select-none object-cover object-center sm:object-top md:object-center lg:object-left"
       />
       {/* subtle overlay to improve form contrast on small screens */}
       <div
         aria-hidden="true"
-        className="absolute inset-0 pointer-events-none bg-[linear-gradient(90deg,rgba(0,0,0,0.45),rgba(0,0,0,0.15))] lg:bg-[linear-gradient(90deg,rgba(0,0,0,0.0),rgba(0,0,0,0.0))]"
+        className="absolute inset-0 pointer-events-none bg-[linear-gradient(90deg,rgba(0,0,0,0.45),rgba(0,0,0,0.15))] lg:bg-[linear-gradient(90deg,rgba(0,0,0,0.12),rgba(0,0,0,0.0))]"
       />
       <div className="relative grid h-full grid-cols-1 lg:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]">
         {/* Left panel — background branding visible */}
