@@ -42,7 +42,7 @@ interface MaintenanceFormData {
   status: string;
   scheduleDate: string;
   completedDate: string;
-  technician: string;
+  assignedTo: string;
   cost: string;
   description: string;
 }
@@ -104,7 +104,8 @@ export default function Maintenance() {
   const [open, setOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [loadingWorkOrders, setLoadingWorkOrders] = useState(false);
-  const [form, setForm] = useState<MaintenanceFormData>({ asset: '', type: maintenanceTypes[0].value, status: maintenanceStatuses[0].value, scheduleDate: '', completedDate: '', technician: '', cost: '', description: '' });
+  const [selectedWorkOrder, setSelectedWorkOrder] = useState<MaintenanceWorkOrder | null>(null);
+  const [form, setForm] = useState<MaintenanceFormData>({ asset: '', type: maintenanceTypes[0].value, status: maintenanceStatuses[0].value, scheduleDate: '', completedDate: '', assignedTo: '', cost: '', description: '' });
   const { assets } = useAssets();
 
   useEffect(() => {
@@ -146,11 +147,35 @@ export default function Maintenance() {
     searchQuery === '' || wo.asset.toLowerCase().includes(searchQuery.toLowerCase()) || wo.type.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const resetForm = () => setForm({
+    asset: '',
+    type: maintenanceTypes[0].value,
+    status: maintenanceStatuses[0].value,
+    scheduleDate: '',
+    completedDate: '',
+    assignedTo: '',
+    cost: '',
+    description: '',
+  });
+
+  const currentYear = new Date().getFullYear();
+  const annualMaintenanceCost = workOrders.reduce((total, wo) => {
+    const value = Number(wo.cost ?? 0);
+    const scheduleYear = wo.scheduleDate ? new Date(wo.scheduleDate).getFullYear() : null;
+    if (!wo.cost || scheduleYear !== currentYear || !Number.isFinite(value)) return total;
+    return total + value;
+  }, 0);
+
   const handleCreate = async () => {
-    if (!form.asset.trim() || !form.type.trim() || !form.scheduleDate.trim()) {
-      toast.error('Asset, work type, and schedule date are required');
+    if (!form.asset.trim() || !form.type.trim() || !form.scheduleDate.trim() || !form.cost.trim() || Number(form.cost) <= 0) {
+      toast.error('Asset, work type, schedule date, and a valid cost are required');
       return;
     }
+
+    const assignmentNote = form.assignedTo.trim();
+    const description = assignmentNote
+      ? `${form.description || ''}${form.description ? '\n' : ''}New assignment: ${assignmentNote}`.trim()
+      : form.description || '';
 
     try {
       const response = await authFetch(API_BASE, {
@@ -162,9 +187,9 @@ export default function Maintenance() {
           schedule_date: form.scheduleDate,
           completed_date: form.completedDate || null,
           status: form.status,
-          technician: form.technician ? Number(form.technician) : null,
-          cost: form.cost ? Number(form.cost) : null,
-          description: form.description || '',
+          technician: null,
+          cost: Number(form.cost),
+          description,
         }),
       });
       if (!response.ok) {
@@ -176,7 +201,7 @@ export default function Maintenance() {
       const created = normalizeMaintenanceRecord(createdResponse);
       setWorkOrders((prev) => [created, ...prev]);
       toast.success(`Work order created for ${created.asset}`);
-      setForm({ asset: '', type: maintenanceTypes[0].value, status: maintenanceStatuses[0].value, scheduleDate: '', completedDate: '', technician: '', cost: '', description: '' });
+      resetForm();
       setOpen(false);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to create work order');
@@ -205,6 +230,37 @@ export default function Maintenance() {
     }
   };
 
+  const handleWorkOrderAction = async (id: string, action: 'mark_in_progress' | 'mark_completed' | 'delete') => {
+    const target = workOrders.find((wo) => wo.id === id);
+    if (!target) return;
+
+    try {
+      if (action === 'delete') {
+        const response = await authFetch(`${API_BASE}${id}/`, { method: 'DELETE' });
+        if (!response.ok) throw new Error('Failed to delete work order');
+        setWorkOrders((prev) => prev.filter((wo) => wo.id !== id));
+        toast.success('Work order deleted');
+        return;
+      }
+
+      const nextStatus = action === 'mark_in_progress' ? 'in_progress' : 'completed';
+      const response = await authFetch(`${API_BASE}${id}/`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: nextStatus }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.detail || payload.error || 'Failed to update work order');
+      }
+      const updated = normalizeMaintenanceRecord(await response.json());
+      setWorkOrders((prev) => prev.map((wo) => (wo.id === id ? updated : wo)));
+      toast.success(`Work order marked as ${updated.status.replace('_', ' ')}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Action failed');
+    }
+  };
+
   return (
     <AppLayout>
       <div className="space-y-6">
@@ -222,7 +278,12 @@ export default function Maintenance() {
             <Button variant="secondary" onClick={handleExport} disabled={exporting} className="shadow-lg shadow-primary/10">
               <span>{exporting ? 'Exporting…' : 'Export CSV'}</span>
             </Button>
-            <Dialog open={open} onOpenChange={setOpen}>
+            <Dialog open={open} onOpenChange={(nextOpen) => {
+              if (nextOpen) {
+                resetForm();
+              }
+              setOpen(nextOpen);
+            }}>
               <DialogTrigger asChild>
                 <Button className="shadow-lg shadow-primary/20">
                   <Plus className="mr-2 h-4 w-4" />
@@ -291,8 +352,17 @@ export default function Maintenance() {
                     </div>
                   </div>
                   <div className="grid gap-2">
-                    <Label htmlFor="wo-cost">Cost (optional)</Label>
-                    <Input id="wo-cost" type="number" step="0.01" value={form.cost} onChange={(e) => setForm({ ...form, cost: e.target.value })} placeholder="0.00" />
+                    <Label htmlFor="wo-assigned">Assigned to</Label>
+                    <Input
+                      id="wo-assigned"
+                      value={form.assignedTo}
+                      onChange={(e) => setForm({ ...form, assignedTo: e.target.value })}
+                      placeholder="Enter new assignment name"
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="wo-cost">Cost (required)</Label>
+                    <Input id="wo-cost" type="number" step="0.01" min="0" value={form.cost} onChange={(e) => setForm({ ...form, cost: e.target.value })} placeholder="0.00" required />
                   </div>
                   <div className="grid gap-2">
                     <Label htmlFor="wo-desc">Description</Label>
@@ -343,6 +413,16 @@ export default function Maintenance() {
             </CardContent>
             <div className="absolute inset-x-0 bottom-0 h-[2px] bg-gradient-to-r from-transparent via-[hsl(var(--status-active))]/40 to-transparent" />
           </Card>
+          <Card className="card-hover relative overflow-hidden">
+            <CardContent className="pt-6 flex items-center gap-4">
+              <div className="p-3 rounded-xl bg-[hsl(var(--chart-5))]/10"><CalendarDays className="h-5 w-5 text-[hsl(var(--chart-5))]" /></div>
+              <div>
+                <p className="text-2xl font-bold">${annualMaintenanceCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                <p className="text-sm text-muted-foreground">Annual Maintenance Cost</p>
+              </div>
+            </CardContent>
+            <div className="absolute inset-x-0 bottom-0 h-[2px] bg-gradient-to-r from-transparent via-[hsl(var(--chart-5))]/40 to-transparent" />
+          </Card>
         </div>
 
         {/* Work Orders */}
@@ -383,9 +463,13 @@ export default function Maintenance() {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      <DropdownMenuItem>View Details</DropdownMenuItem>
-                      <DropdownMenuItem>Update Status</DropdownMenuItem>
-                      <DropdownMenuItem>Reassign</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setSelectedWorkOrder(wo)}>View Details</DropdownMenuItem>
+                      {wo.status !== 'in_progress' ? (
+                        <DropdownMenuItem onClick={() => handleWorkOrderAction(wo.id, 'mark_in_progress')}>Mark In Progress</DropdownMenuItem>
+                      ) : (
+                        <DropdownMenuItem onClick={() => handleWorkOrderAction(wo.id, 'mark_completed')}>Mark Completed</DropdownMenuItem>
+                      )}
+                      <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => handleWorkOrderAction(wo.id, 'delete')}>Delete</DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
@@ -424,6 +508,31 @@ export default function Maintenance() {
           </Card>
         )}
       </div>
+
+        <Dialog open={!!selectedWorkOrder} onOpenChange={(open) => !open && setSelectedWorkOrder(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Work order details</DialogTitle>
+              <DialogDescription>{selectedWorkOrder?.asset || 'Maintenance work order'}</DialogDescription>
+            </DialogHeader>
+            {selectedWorkOrder && (
+              <div className="space-y-3 py-2 text-sm">
+                <div className="flex items-center justify-between"><span className="text-muted-foreground">Work type</span><span className="font-medium capitalize">{selectedWorkOrder.type}</span></div>
+                <div className="flex items-center justify-between"><span className="text-muted-foreground">Status</span><Badge variant="secondary" className={woStatusStyles[selectedWorkOrder.status]}>{selectedWorkOrder.status.replace('_', ' ')}</Badge></div>
+                <div className="flex items-center justify-between"><span className="text-muted-foreground">Technician</span><span>{selectedWorkOrder.technician}</span></div>
+                <div className="flex items-center justify-between"><span className="text-muted-foreground">Scheduled</span><span>{selectedWorkOrder.scheduleDate}</span></div>
+                <div className="flex items-center justify-between"><span className="text-muted-foreground">Cost</span><span>${Number(selectedWorkOrder.cost ?? 0).toFixed(2)}</span></div>
+                <div className="rounded-lg border bg-muted/30 p-3">
+                  <p className="font-medium mb-1">Description</p>
+                  <p className="text-muted-foreground whitespace-pre-wrap">{selectedWorkOrder.description || 'No description provided'}</p>
+                </div>
+              </div>
+            )}
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setSelectedWorkOrder(null)}>Close</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
     </AppLayout>
   );
 }

@@ -13,7 +13,12 @@ def validate_status_transition(current_status: str, new_status: str) -> None:
     """
     if current_status == new_status:
         return  # Same status is always OK
-    
+
+    if current_status in {AssetStatus.ASSIGNED, AssetStatus.IN_USE} and new_status == AssetStatus.AVAILABLE:
+        raise ValidationError(
+            "Asset is currently assigned or in use. Mark it available only via the asset assignment return workflow."
+        )
+
     if current_status not in VALID_STATUS_TRANSITIONS:
         raise ValidationError(f"Unknown current status: {current_status}")
     

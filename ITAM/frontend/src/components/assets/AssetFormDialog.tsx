@@ -52,7 +52,7 @@ Object.values(CATEGORY_SPECS).forEach((categorySpecs) => {
   });
 });
 
-const visibleStatusValues = ['available', 'in-use', 'maintenance', 'retired', 'disposed', 'lost', 'damaged'] as const;
+const visibleStatusValues = ['available', 'maintenance', 'retired', 'disposed', 'lost', 'damaged'] as const;
 
 const assetFormSchema = z.object({
   name: z.string().min(1, 'Name is required').max(100),
@@ -105,6 +105,10 @@ export function AssetFormDialog({ open, onOpenChange, asset, onSubmit, onOpenBul
 
   const selectedCategory = form.watch('category') as AssetCategory;
   const categorySpecs = getSpecsForCategory(selectedCategory);
+  const statusOptions =
+    isEditing && asset?.status === 'in_use'
+      ? ['in-use', 'maintenance', 'retired', 'disposed', 'lost', 'damaged']
+      : getVisibleAssetStatusOptions(statusLabels).map(([value]) => String(value));
 
   useEffect(() => {
     const loadManufacturers = async () => {
@@ -266,11 +270,14 @@ export function AssetFormDialog({ open, onOpenChange, asset, onSubmit, onOpenBul
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        {getVisibleAssetStatusOptions(statusLabels).map(([value, label]) => (
-                          <SelectItem key={value} value={value}>
-                            {label}
-                          </SelectItem>
-                        ))}
+                        {statusOptions.map((value) => {
+                          const label = statusLabels[value as keyof typeof statusLabels] ?? value;
+                          return (
+                            <SelectItem key={value} value={value}>
+                              {label}
+                            </SelectItem>
+                          );
+                        })}
                       </SelectContent>
                     </Select>
                     <FormMessage />

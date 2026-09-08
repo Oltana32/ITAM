@@ -7,7 +7,9 @@ export interface AuthUser {
   last_name: string;
   role: BackendUserRole;
   department?: string;
+  avatar?: string | null;
   is_active?: boolean;
+  must_change_password?: boolean;
   date_joined?: string;
 }
 

@@ -70,9 +70,9 @@ class MaintenanceLifecycleTests(TestCase):
         self.assertEqual(asset.status, AssetStatus.AVAILABLE)
         self.assertIsNotNone(record.completed_date)
 
-    def test_cannot_start_maintenance_for_active_assignment(self):
+    def test_maintenance_can_start_for_active_assignment_without_reassigning_asset(self):
         asset = self.create_asset(tag="MNT002", serial_number="MNT-SN002")
-        Assignment.objects.create(
+        assignment = Assignment.objects.create(
             asset=asset,
             assigner=self.user,
             assigned_to_name="Assigned User",
@@ -81,11 +81,73 @@ class MaintenanceLifecycleTests(TestCase):
             status=AssetStatus.ASSIGNED,
         )
 
+        record = MaintenanceRecord.objects.create(
+            asset=asset,
+            type=MaintenanceType.CORRECTIVE,
+            schedule_date=timezone.now().date(),
+            status=MaintenanceStatus.IN_PROGRESS,
+            technician=self.user,
+            cost="250.00",
+        )
+
+        assignment.refresh_from_db()
+        asset.refresh_from_db()
+        self.assertEqual(asset.status, AssetStatus.MAINTENANCE)
+        self.assertEqual(assignment.assigned_to_user, None)
+        self.assertEqual(assignment.assigned_to_name, "Assigned User")
+        self.assertEqual(record.previous_assignee_name, "Assigned User")
+
+        record.status = MaintenanceStatus.COMPLETED
+        record.save()
+
+        assignment.refresh_from_db()
+        asset.refresh_from_db()
+        self.assertEqual(asset.status, AssetStatus.ASSIGNED)
+        self.assertEqual(assignment.assigned_to_name, "Assigned User")
+        self.assertEqual(record.previous_assignee_name, "Assigned User")
+
+    def test_cost_is_required_for_maintenance_record(self):
+        asset = self.create_asset(tag="MNT003", serial_number="MNT-SN003")
+
         with self.assertRaises(ValidationError):
             MaintenanceRecord.objects.create(
                 asset=asset,
-                type=MaintenanceType.CORRECTIVE,
+                type=MaintenanceType.PREVENTIVE,
                 schedule_date=timezone.now().date(),
-                status=MaintenanceStatus.IN_PROGRESS,
+                status=MaintenanceStatus.SCHEDULED,
                 technician=self.user,
+                cost=None,
             )
+
+    def test_completed_maintenance_returns_asset_to_previous_owner(self):
+        asset = self.create_asset(tag="MNT004", serial_number="MNT-SN004")
+        assignment = Assignment.objects.create(
+            asset=asset,
+            assigner=self.user,
+            assigned_to_name="Previous Owner",
+            employee_id="EMP-OWNER",
+            location="HQ",
+            status=AssetStatus.ASSIGNED,
+        )
+
+        record = MaintenanceRecord.objects.create(
+            asset=asset,
+            type=MaintenanceType.CORRECTIVE,
+            schedule_date=timezone.now().date(),
+            status=MaintenanceStatus.IN_PROGRESS,
+            technician=self.user,
+            cost="125.50",
+        )
+
+        asset.refresh_from_db()
+        self.assertEqual(asset.status, AssetStatus.MAINTENANCE)
+        self.assertEqual(assignment.status, AssetStatus.ASSIGNED)
+
+        record.status = MaintenanceStatus.COMPLETED
+        record.save()
+
+        asset.refresh_from_db()
+        assignment.refresh_from_db()
+        self.assertEqual(asset.status, AssetStatus.ASSIGNED)
+        self.assertEqual(assignment.status, AssetStatus.ASSIGNED)
+        self.assertEqual(assignment.assigned_to_name, "Previous Owner")

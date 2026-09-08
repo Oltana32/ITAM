@@ -1,7 +1,11 @@
 """Tests for the users app."""
 
+import io
+
 import pytest
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
+from PIL import Image
 from rest_framework import status
 from rest_framework.test import APITestCase, APIClient
 
@@ -81,3 +85,61 @@ class TestUserAPI(APITestCase):
         assert response.status_code == status.HTTP_200_OK
         self.user.refresh_from_db()
         assert self.user.email == "newemail@example.com"
+
+    def test_user_can_update_profile_with_avatar(self):
+        """Users can update their own profile details and upload an avatar."""
+        image_bytes = io.BytesIO()
+        Image.new("RGB", (1, 1), color="white").save(image_bytes, format="PNG")
+        avatar = SimpleUploadedFile("avatar.png", image_bytes.getvalue(), content_type="image/png")
+
+        response = self.client.patch(
+            "/api/users/me/",
+            {
+                "first_name": "Updated",
+                "last_name": "User",
+                "department": "Operations",
+                "avatar": avatar,
+            },
+            format="multipart",
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        self.user.refresh_from_db()
+        assert self.user.first_name == "Updated"
+        assert self.user.last_name == "User"
+        assert self.user.department == "Operations"
+        assert self.user.avatar.name
+
+    def test_admin_can_delete_user(self):
+        """Admins can remove user accounts."""
+        admin = User.objects.create_user(
+            username="adminuser",
+            email="admin@example.com",
+            password="adminpass123",
+            role="admin",
+        )
+        self.client.force_authenticate(user=admin)
+
+        response = self.client.delete(f"/api/users/{self.user.id}/")
+
+        assert response.status_code == status.HTTP_204_NO_CONTENT
+        assert not User.objects.filter(pk=self.user.pk).exists()
+
+    def test_force_password_change_requires_new_password_and_confirmation(self):
+        """A first-time login should require a new password and confirmation."""
+        self.user.must_change_password = True
+        self.user.save(update_fields=["must_change_password"])
+
+        response = self.client.post(
+            "/api/users/change_password/",
+            {
+                "new_password": "NewPass123!",
+                "confirm_password": "NewPass123!",
+            },
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        self.user.refresh_from_db()
+        assert self.user.check_password("NewPass123!")
+        assert self.user.must_change_password is False

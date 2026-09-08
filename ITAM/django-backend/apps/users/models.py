@@ -6,6 +6,7 @@ class UserManager(BaseUserManager):
     def create_user(self, email, password=None, **extra_fields):
         if not email:
             raise ValueError("The Email field must be set")
+        extra_fields.setdefault("must_change_password", True)
         email = self.normalize_email(email)
         user = self.model(email=email, **extra_fields)
         user.set_password(password)
@@ -16,6 +17,7 @@ class UserManager(BaseUserManager):
         extra_fields.setdefault("is_staff", True)
         extra_fields.setdefault("is_superuser", True)
         extra_fields.setdefault("is_active", True)
+        extra_fields.setdefault("must_change_password", False)
 
         if extra_fields.get("is_staff") is not True:
             raise ValueError("Superuser must have is_staff=True.")
@@ -40,6 +42,8 @@ class User(AbstractUser):
         db_index=True,
     )
     department = models.CharField(max_length=255, blank=True)
+    avatar = models.ImageField(upload_to="avatars/%Y/%m/%d/", blank=True, null=True)
+    must_change_password = models.BooleanField(default=False)
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS: list[str] = []

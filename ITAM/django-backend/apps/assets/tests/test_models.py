@@ -107,3 +107,11 @@ class AssetStatusTransitionTests(TestCase):
         # AVAILABLE status means not in active use
         self.asset.status = AssetStatus.AVAILABLE
         self.assertFalse(self.asset.is_in_active_use)
+
+    def test_in_use_assets_cannot_be_set_back_to_available_directly(self):
+        """In-use assets must be returned through assignment workflows."""
+        Asset.objects.filter(pk=self.asset.pk).update(status=AssetStatus.IN_USE)
+        self.asset.refresh_from_db()
+
+        with self.assertRaises(ValidationError):
+            self.asset.change_status(AssetStatus.AVAILABLE, changed_by=self.user)

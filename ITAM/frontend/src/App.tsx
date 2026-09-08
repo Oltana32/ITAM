@@ -39,6 +39,12 @@ function ProtectedRoute({ path, children }: { path: string; children: JSX.Elemen
 
 function LoginRoute() {
   if (isAuthenticated()) {
+    if (typeof window !== "undefined") {
+      const user = JSON.parse(localStorage.getItem("assetBuddy.auth.user") ?? "null");
+      if (user?.must_change_password) {
+        return <Login />;
+      }
+    }
     const role: UserRole = getCurrentUserRole();
     return <Navigate to={getDefaultPath(role)} replace />;
   }

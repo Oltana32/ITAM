@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from apps.assets.history import FIELD_LABELS
+from apps.core.constants import AssetStatus
 from apps.users.models import UserRole
 
 from .models import Asset, AssetStatusHistory
@@ -118,6 +119,23 @@ class AssetSerializer(serializers.ModelSerializer):
 
     def get_depreciation(self, instance):
         return instance.calculate_depreciation()
+
+    def validate_status(self, value: str) -> str:
+        if value == AssetStatus.IN_USE:
+            raise serializers.ValidationError(
+                "Asset in use must be managed through the assignment workflow."
+            )
+
+        current_status = getattr(self.instance, "status", None)
+        if (
+            current_status in {AssetStatus.ASSIGNED, AssetStatus.IN_USE}
+            and value == AssetStatus.AVAILABLE
+        ):
+            raise serializers.ValidationError(
+                "Asset is assigned or in use. Return it through the assignment flow before marking it available."
+            )
+
+        return value
 
     def validate_serial_number(self, value: str) -> str:
         v = value.strip()

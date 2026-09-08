@@ -1,3 +1,5 @@
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Q
 from rest_framework import mixins, viewsets
 from rest_framework.decorators import action
@@ -15,14 +17,17 @@ class UserViewSet(
     mixins.RetrieveModelMixin,
     mixins.CreateModelMixin,
     mixins.UpdateModelMixin,
+    mixins.DestroyModelMixin,
     viewsets.GenericViewSet,
 ):
     queryset = User.objects.all()
     serializer_class = UserSerializer
 
     def get_permissions(self):
-        if self.action in ("create", "list", "retrieve", "destroy"):
+        if self.action in ("create", "destroy"):
             return [IsAdmin()]
+        if self.action in ("list", "retrieve"):
+            return [IsAuthenticated(), IsITStaffOrAdmin()]
         if self.action in ("update", "partial_update"):
             return [IsAuthenticated(), IsSelfOrITStaffOrAdmin()]
         if self.action == "me":
@@ -63,3 +68,23 @@ class UserViewSet(
             ser.validated_data.pop("role", None)
         ser.save()
         return Response(UserSerializer(request.user).data)
+
+    @action(detail=False, methods=["post"], url_path="change_password", permission_classes=[IsAuthenticated])
+    def change_password(self, request):
+        new_password = request.data.get("new_password") or request.data.get("password")
+        confirm_password = request.data.get("confirm_password") or request.data.get("confirmPassword")
+
+        if not new_password or not confirm_password:
+            return Response({"detail": "New password and confirmation are required."}, status=400)
+        if new_password != confirm_password:
+            return Response({"detail": "Passwords do not match."}, status=400)
+
+        try:
+            validate_password(new_password, user=request.user)
+        except DjangoValidationError as exc:
+            return Response({"detail": exc.messages}, status=400)
+
+        request.user.set_password(new_password)
+        request.user.must_change_password = False
+        request.user.save(update_fields=["password", "must_change_password"])
+        return Response({"detail": "Password updated successfully."})

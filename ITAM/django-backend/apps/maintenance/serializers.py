@@ -43,13 +43,14 @@ class MaintenanceRecordSerializer(serializers.ModelSerializer):
             "schedule_date",
             None,
         )
+        cost = attrs.get("cost")
+        if cost is None and self.instance is not None and self.instance.cost is not None:
+            cost = self.instance.cost
+        if cost is None or cost == "":
+            raise serializers.ValidationError({"cost": "Cost is required."})
         if completed and schedule and completed < schedule:
             raise serializers.ValidationError(
                 {"completed_date": "Completed date cannot be before schedule date."},
-            )
-        if asset and status == MaintenanceStatus.IN_PROGRESS and asset.is_in_active_use:
-            raise serializers.ValidationError(
-                {"asset": "Assigned or in-use assets must be returned before maintenance starts."}
             )
         return attrs
 

@@ -15,10 +15,12 @@ class UserSerializer(serializers.ModelSerializer):
             "last_name",
             "role",
             "department",
+            "avatar",
             "is_active",
+            "must_change_password",
             "date_joined",
         )
-        read_only_fields = ("id", "date_joined")
+        read_only_fields = ("id", "date_joined", "must_change_password")
 
 
 class UserCreateSerializer(serializers.ModelSerializer):
@@ -33,6 +35,8 @@ class UserCreateSerializer(serializers.ModelSerializer):
             "last_name",
             "role",
             "department",
+            "avatar",
+            "must_change_password",
         )
 
     def validate_password(self, value: str) -> str:
@@ -41,6 +45,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         password = validated_data.pop("password")
+        validated_data.setdefault("must_change_password", True)
         user = User(**validated_data)
         user.set_password(password)
         user.save()
@@ -50,7 +55,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
 class UserUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ("first_name", "last_name", "email", "role", "department", "is_active")
+        fields = ("first_name", "last_name", "email", "role", "department", "avatar", "is_active")
 
     def validate_role(self, value: str) -> str:
         request = self.context.get("request")

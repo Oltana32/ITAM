@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Users as UsersIcon, UserPlus, Shield, UserCheck, Search, Mail } from 'lucide-react';
+import { Users as UsersIcon, UserPlus, Shield, UserCheck, Search, Mail, Trash2 } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { authFetch } from '@/lib/auth';
 
 import { getRoleLabel } from '@/lib/permissions';
+import { getStoredUser } from '@/lib/auth';
 
 const roleColors: Record<string, string> = {
   admin: 'bg-destructive/10 text-destructive border-destructive/20',
@@ -41,6 +42,8 @@ export default function Users() {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ first_name: '', last_name: '', email: '', password: '', role: 'it_team', department: '' });
+  const currentUser = getStoredUser();
+  const canDeleteUsers = currentUser?.role === 'admin';
 
   useEffect(() => {
     void (async () => {
@@ -76,6 +79,23 @@ export default function Users() {
     toast.success(`${created.first_name} ${created.last_name} added`);
     setForm({ first_name: '', last_name: '', email: '', password: '', role: 'it_team', department: '' });
     setOpen(false);
+  };
+
+  const handleDeleteUser = async (userId: string) => {
+    const target = users.find((entry) => entry.id === userId);
+    if (!target) return;
+
+    const confirmed = window.confirm(`Delete ${target.first_name || target.email}? This action cannot be undone.`);
+    if (!confirmed) return;
+
+    const response = await authFetch(`/api/users/${userId}/`, { method: 'DELETE' });
+    if (!response.ok) {
+      toast.error('Failed to delete user');
+      return;
+    }
+
+    setUsers((prev) => prev.filter((entry) => entry.id !== userId));
+    toast.success('User deleted successfully');
   };
 
   return (
@@ -203,6 +223,18 @@ export default function Users() {
                   <div className="flex items-center gap-4">
                     <span className="text-xs text-muted-foreground">{user.department || 'Unassigned'}</span>
                     <Badge variant="secondary" className={roleColors[user.role]}>{getRoleLabel(user.role)}</Badge>
+                    {canDeleteUsers && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-destructive hover:text-destructive"
+                        onClick={() => handleDeleteUser(user.id)}
+                        aria-label={`Delete ${user.first_name || user.email}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
                   </div>
                 </div>
               ))}
