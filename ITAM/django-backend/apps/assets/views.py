@@ -146,7 +146,10 @@ class AssetViewSet(viewsets.ModelViewSet):
             location = Location.objects.filter(name__iexact=str(location_name).strip()).first()
             if location:
                 return location, None
-        default_location = Location.objects.order_by("id").first()
+        # Prefer an "IT Store" location if present, otherwise fall back to first location.
+        default_location = Location.objects.filter(name__iexact="IT Store").first()
+        if not default_location:
+            default_location = Location.objects.order_by("id").first()
         if default_location:
             return default_location, None
         return None, "No locations exist. Ask an admin to add a location first."
