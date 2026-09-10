@@ -223,18 +223,30 @@ export default function Users() {
                   <div className="flex items-center gap-4">
                     <span className="text-xs text-muted-foreground">{user.department || 'Unassigned'}</span>
                     <Badge variant="secondary" className={roleColors[user.role]}>{getRoleLabel(user.role)}</Badge>
-                    {canDeleteUsers && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-destructive hover:text-destructive"
-                        onClick={() => handleDeleteUser(user.id)}
-                        aria-label={`Delete ${user.first_name || user.email}`}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    )}
+                                    {canDeleteUsers && (
+                                      <div className="flex items-center gap-2">
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="icon"
+                                          className="h-8 w-8"
+                                          onClick={() => handleResetPassword(user.id, `${user.first_name} ${user.last_name}`)}
+                                          aria-label={`Reset password for ${user.first_name || user.email}`}
+                                        >
+                                          <UserCheck className="h-4 w-4" />
+                                        </Button>
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="icon"
+                                          className="h-8 w-8 text-destructive hover:text-destructive"
+                                          onClick={() => handleDeleteUser(user.id)}
+                                          aria-label={`Delete ${user.first_name || user.email}`}
+                                        >
+                                          <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                      </div>
+                                    )}
                   </div>
                 </div>
               ))}
@@ -244,4 +256,29 @@ export default function Users() {
       </div>
     </AppLayout>
   );
+}
+
+async function handleResetPassword(userId: string, displayName: string) {
+  const confirmed = window.confirm(`Reset password for ${displayName}? This will require them to set a new password on next login.`);
+  if (!confirmed) return;
+  try {
+    const res = await authFetch(`/api/users/${userId}/reset_password/`, { method: 'POST' });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Failed to reset password');
+    }
+    const payload = await res.json();
+    const temp = payload.temporary_password;
+    // show temporary password to admin so they can pass it to the user
+    // also copy to clipboard for convenience
+    if (temp) {
+      try { await navigator.clipboard.writeText(temp); } catch (e) { /* ignore */ }
+      window.alert(`Temporary password: ${temp}\n(also copied to clipboard)`);
+      toast.success('Password reset. Temporary password copied to clipboard.');
+    } else {
+      toast.success('Password reset successfully.');
+    }
+  } catch (err) {
+    toast.error(String(err));
+  }
 }

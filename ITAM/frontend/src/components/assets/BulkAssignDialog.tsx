@@ -9,11 +9,15 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+// Input and Label already imported above
 import { toast } from 'sonner';
 import { authFetch } from '@/lib/auth';
-import { Asset } from '@/types/asset';
+import { Asset, categoryLabels, AssetCategory } from '@/types/asset';
+import { useAssignments } from '@/hooks/useAssignmentsQuery';
+import { useLocations } from '@/hooks/useLocations';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 interface BulkAssignDialogProps {
   open: boolean;
@@ -29,10 +33,12 @@ export function BulkAssignDialog({ open, onOpenChange, selectedAssets, onAssignC
     assigned_to_name: '',
     employee_id: '',
     department: '',
-    email: '',
+    position: '',
     location: '',
     expected_return_date: '',
   });
+  const { createAssignment, isCreatingAssignment } = useAssignments();
+  const { locations } = useLocations();
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({
@@ -46,7 +52,40 @@ export function BulkAssignDialog({ open, onOpenChange, selectedAssets, onAssignC
       toast.error('Please fill in Name and Employee ID');
       return;
     }
+    // If single asset selected, create a regular assignment using assignments API
+    if (selectedAssets.length === 1) {
+      setIsAssigning(true);
+      try {
+        const asset = selectedAssets[0];
+        const today = new Date();
+        const assigned_date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+        const locationLabel = formData.location || (locations.find(l => l.id === asset.location)?.name || asset.location || 'Unassigned');
 
+        await createAssignment({
+          asset: Number(asset.id),
+          assigned_date,
+          status: 'assigned',
+          notes: `Assigned ${asset.name} via Assets page`,
+          assignedTo: formData.assigned_to_name,
+          employeeId: formData.employee_id,
+          department: formData.department,
+          
+          location: locationLabel,
+          expectedReturnDate: formData.expected_return_date || null,
+        });
+
+        toast.success('Assignment saved');
+        setAssignResult({ summary: { created: 1, failed: 0 }, created: [], errors: [] });
+        if (onAssignComplete) onAssignComplete();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : String(err));
+      } finally {
+        setIsAssigning(false);
+      }
+      return;
+    }
+
+    // Bulk assign fallback
     setIsAssigning(true);
     try {
       const payload = {
@@ -54,7 +93,7 @@ export function BulkAssignDialog({ open, onOpenChange, selectedAssets, onAssignC
         assigned_to_name: formData.assigned_to_name,
         employee_id: formData.employee_id,
         department: formData.department,
-        email: formData.email,
+        
         location: formData.location,
         expected_return_date: formData.expected_return_date || null,
       };
@@ -93,7 +132,7 @@ export function BulkAssignDialog({ open, onOpenChange, selectedAssets, onAssignC
       assigned_to_name: '',
       employee_id: '',
       department: '',
-      email: '',
+      position: '',
       location: '',
       expected_return_date: '',
     });
@@ -105,7 +144,7 @@ export function BulkAssignDialog({ open, onOpenChange, selectedAssets, onAssignC
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Bulk Assign Assets</DialogTitle>
+          <DialogTitle>{selectedAssets.length === 1 ? 'Assign Asset' : 'Bulk Assign Assets'}</DialogTitle>
           <DialogDescription>
             Assign {selectedAssets.length} selected asset{selectedAssets.length !== 1 ? 's' : ''} to an assignee.
           </DialogDescription>
@@ -127,36 +166,38 @@ export function BulkAssignDialog({ open, onOpenChange, selectedAssets, onAssignC
             </div>
 
             <div className="grid grid-cols-2 gap-4">
+              {selectedAssets.length === 1 && (
+                <>
+                  <div className="space-y-2 col-span-2">
+                    <Label>Asset Category</Label>
+                    <Select value={selectedAssets[0].category as AssetCategory} onValueChange={() => {}}>
+                      <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {Object.entries(categoryLabels).map(([k, v]) => (
+                          <SelectItem key={k} value={k}>{v}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2 col-span-2">
+                    <Label>Available Asset</Label>
+                    <Select value={selectedAssets[0].id} onValueChange={() => {}}>
+                      <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={selectedAssets[0].id}>{selectedAssets[0].name} ({selectedAssets[0].assetTag})</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </>
+              )}
               <div className="space-y-2 col-span-2">
-                <Label htmlFor="assigned_to_name">Assignee Name *</Label>
+                <Label htmlFor="assigned_to_name">Assigned To *</Label>
                 <Input
                   id="assigned_to_name"
                   name="assigned_to_name"
                   placeholder="e.g., Jane Doe"
                   value={formData.assigned_to_name}
-                  onChange={handleChange}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="employee_id">Employee ID *</Label>
-                <Input
-                  id="employee_id"
-                  name="employee_id"
-                  placeholder="e.g., E-1023"
-                  value={formData.employee_id}
-                  onChange={handleChange}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  name="email"
-                  type="email"
-                  placeholder="jane@company.com"
-                  value={formData.email}
                   onChange={handleChange}
                 />
               </div>
@@ -173,18 +214,62 @@ export function BulkAssignDialog({ open, onOpenChange, selectedAssets, onAssignC
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="location">Location</Label>
+                <Label htmlFor="position">Position</Label>
                 <Input
-                  id="location"
-                  name="location"
-                  placeholder="e.g., HQ - 3rd Floor"
-                  value={formData.location}
+                  id="position"
+                  name="position"
+                  placeholder="e.g. System Administrator"
+                  value={formData.position}
+                  onChange={handleChange}
+                />
+              </div>
+
+
+              {selectedAssets.length === 1 ? (
+                <>
+                  <div className="space-y-2 col-span-2">
+                    <Label>Asset</Label>
+                    <Input value={`${selectedAssets[0].name} (${selectedAssets[0].assetTag})`} disabled />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Location</Label>
+                    <Select value={formData.location} onValueChange={(v) => setFormData({ ...formData, location: v })}>
+                      <SelectTrigger className="h-9 w-[240px] text-sm"><SelectValue placeholder={selectedAssets[0].location || 'Select location'} /></SelectTrigger>
+                      <SelectContent>
+                        {locations.map((l) => (
+                          <SelectItem key={l.id} value={l.name}>{l.name} - {l.city}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">IT Stock location cannot be selected for assignments</p>
+                  </div>
+                </>
+              ) : (
+                <div className="space-y-2">
+                  <Label htmlFor="location">Location</Label>
+                  <Input
+                    id="location"
+                    name="location"
+                    placeholder="e.g., HQ - 3rd Floor"
+                    value={formData.location}
+                    onChange={handleChange}
+                  />
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <Label htmlFor="employee_id">Employee ID</Label>
+                <Input
+                  id="employee_id"
+                  name="employee_id"
+                  placeholder="e.g., E-1023"
+                  value={formData.employee_id}
                   onChange={handleChange}
                 />
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="expected_return_date">Expected Return Date</Label>
+                <Label htmlFor="expected_return_date">Given Date</Label>
                 <Input
                   id="expected_return_date"
                   name="expected_return_date"
@@ -238,15 +323,12 @@ export function BulkAssignDialog({ open, onOpenChange, selectedAssets, onAssignC
           </div>
         )}
 
-        <DialogFooter>
+        <DialogFooter className="sticky bottom-0 bg-white py-3 flex justify-end gap-2 border-t border-border">
           {!assignResult ? (
             <>
               <Button variant="outline" onClick={handleClose}>Cancel</Button>
-              <Button 
-                onClick={handleAssign} 
-                disabled={!formData.assigned_to_name || !formData.employee_id || isAssigning}
-              >
-                {isAssigning ? 'Assigning...' : 'Assign'}
+              <Button onClick={handleAssign} disabled={!formData.assigned_to_name || !formData.employee_id || isAssigning || isCreatingAssignment}>
+                {(isAssigning || isCreatingAssignment) ? 'Saving…' : (selectedAssets.length === 1 ? 'Save & Print Agreement' : 'Assign')}
               </Button>
             </>
           ) : (

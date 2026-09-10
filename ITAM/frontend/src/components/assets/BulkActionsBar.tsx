@@ -40,7 +40,7 @@ export function BulkActionsBar({ count, onClear, onDelete, onStatusChange, onExp
           </SelectContent>
         </Select>
         {onBulkAssign && (
-          <Button variant="outline" size="sm" onClick={onBulkAssign} className="h-8">
+          <Button size="sm" onClick={onBulkAssign} className="h-8">
             <Send className="mr-1.5 h-3.5 w-3.5" /> Assign
           </Button>
         )}

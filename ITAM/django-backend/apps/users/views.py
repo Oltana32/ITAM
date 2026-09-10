@@ -10,6 +10,8 @@ from config.permissions import IsAdmin, IsITStaffOrAdmin, IsSelfOrITStaffOrAdmin
 
 from .models import User, UserRole
 from .serializers import UserCreateSerializer, UserSerializer, UserUpdateSerializer
+import secrets
+from rest_framework import status
 
 
 class UserViewSet(
@@ -88,3 +90,22 @@ class UserViewSet(
         request.user.must_change_password = False
         request.user.save(update_fields=["password", "must_change_password"])
         return Response({"detail": "Password updated successfully."})
+
+    @action(detail=True, methods=["post"], permission_classes=[IsAdmin])
+    def reset_password(self, request, pk=None):
+        """Admin action: set a temporary password and require the user to change it on next login.
+
+        Returns the temporary password in the response so the admin can provide it to the user.
+        """
+        try:
+            user = self.get_object()
+        except Exception:
+            return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # generate a reasonably strong temporary password
+        temp_password = secrets.token_urlsafe(10)
+        user.set_password(temp_password)
+        user.must_change_password = True
+        user.save(update_fields=["password", "must_change_password"])
+
+        return Response({"detail": "Password reset successfully.", "temporary_password": temp_password})
