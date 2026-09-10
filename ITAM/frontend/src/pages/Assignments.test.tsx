@@ -137,4 +137,12 @@ describe('Assignments', () => {
     expect(screen.getByText(/Jane Doe/i)).toBeInTheDocument();
     expect(screen.queryByText(/John Smith/i)).not.toBeInTheDocument();
   });
+
+  it('shows a given date field in the new assignment form', () => {
+    render(<Assignments />);
+
+    fireEvent.click(screen.getByRole('button', { name: /new assignment/i }));
+
+    expect(screen.getByLabelText(/given date/i)).toBeInTheDocument();
+  });
 });

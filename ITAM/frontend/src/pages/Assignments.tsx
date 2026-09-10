@@ -38,6 +38,7 @@ export default function Assignments() {
   const [locationId, setLocationId] = useState<string>('');
   const [assignedTo, setAssignedTo] = useState<string>('');
   const [employeeId, setEmployeeId] = useState<string>('');
+  const [givenDate, setGivenDate] = useState<string>('');
   const [assetCategoryFilter, setAssetCategoryFilter] = useState<string>('all');
   const [employeeDepartment, setEmployeeDepartment] = useState<string>(currentUser?.department ?? 'IT');
   const [employeePosition, setEmployeePosition] = useState<string>(currentUser?.role === 'it_team' ? 'IT Staff' : 'Employee');
@@ -140,6 +141,7 @@ export default function Assignments() {
     setLocationId('');
     setAssignedTo('');
     setEmployeeId('');
+    setGivenDate('');
     setEmployeeDepartment(currentUser?.department ?? 'IT');
     setEmployeePosition(currentUser?.role === 'it_team' ? 'IT Staff' : 'Employee');
     setAssetCategoryFilter('all');
@@ -270,6 +272,7 @@ export default function Assignments() {
       await createAssignment({
         asset: Number(asset.id),
         assigned_date: assignedDate,
+        expectedReturnDate: givenDate || null,
         status: 'assigned',
         notes,
         assignedTo: assignedTo.trim(),
@@ -587,6 +590,16 @@ export default function Assignments() {
                     onChange={(e) => setEmployeeId(e.target.value)}
                     placeholder="e.g. EMP-12345"
                     required
+                  />
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="given-date">Given Date</Label>
+                  <Input
+                    id="given-date"
+                    type="date"
+                    value={givenDate}
+                    onChange={(e) => setGivenDate(e.target.value)}
                   />
                 </div>
               </div>
