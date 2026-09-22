@@ -32,9 +32,6 @@ class AssetStatus(models.TextChoices):
     LOST = "lost", "Lost/Missing"
     DAMAGED = "damaged", "Damaged (non-repairable)"
     
-    class Meta:
-        verbose_name = "Asset Status"
-        verbose_name_plural = "Asset Statuses"
 
 
 # Define allowed state transitions

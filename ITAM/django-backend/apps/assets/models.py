@@ -39,6 +39,7 @@ class Asset(models.Model):
     status = models.CharField(
         max_length=32,
         choices=AssetStatus.choices,
+        verbose_name="Asset Status",
         default=AssetStatus.AVAILABLE,
         db_index=True,
     )
