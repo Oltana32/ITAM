@@ -5,17 +5,31 @@ from datetime import timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
+from django.core.exceptions import ImproperlyConfigured
 
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def _get_bool_env(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.lower() in ("1", "true", "yes", "on")
+
+
+DEBUG = _get_bool_env("DJANGO_DEBUG", False)
 
 SECRET_KEY = os.environ.get(
     "DJANGO_SECRET_KEY",
     "change-me-in-production-use-env-DJANGO_SECRET_KEY",
 )
 
-DEBUG = os.environ.get("DJANGO_DEBUG", "false").lower() in ("1", "true", "yes")
+if not DEBUG and (
+    not SECRET_KEY or SECRET_KEY.startswith("change-me")
+):
+    raise ImproperlyConfigured("DJANGO_SECRET_KEY must be set to a secure value in production.")
 
 ALLOWED_HOSTS = [
     h.strip()
@@ -133,6 +147,19 @@ REST_FRAMEWORK = {
     ),
 }
 
+# API throttling to reduce abuse and credential stuffing
+REST_FRAMEWORK["DEFAULT_THROTTLE_CLASSES"] = [
+    "rest_framework.throttling.UserRateThrottle",
+    "rest_framework.throttling.AnonRateThrottle",
+]
+REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = {
+    "user": "1000/day",
+    "anon": "20/minute",
+}
+
+# Scoped throttle for token issuance
+REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["login"] = "6/hour"
+
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=int(os.environ.get("JWT_ACCESS_MINUTES", "60"))),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=int(os.environ.get("JWT_REFRESH_DAYS", "7"))),
@@ -150,6 +177,26 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 CORS_ALLOW_CREDENTIALS = True
+
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get(
+        "CSRF_TRUSTED_ORIGINS",
+        "https://localhost,https://127.0.0.1,http://localhost,http://127.0.0.1",
+    ).split(",")
+    if origin.strip()
+]
+
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_BROWSER_XSS_FILTER = True
+X_FRAME_OPTIONS = "DENY"
+SESSION_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SAMESITE = "Lax"
+SESSION_COOKIE_HTTPONLY = True
+CSRF_COOKIE_HTTPONLY = False
+SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin"
 
 # ===================================
 # API Documentation (Swagger/ReDoc)
@@ -275,22 +322,8 @@ SESSION_CACHE_ALIAS = "default"
 # ===================================
 # Security Settings (Production)
 # ===================================
-SECURE_SSL_REDIRECT = os.environ.get("SECURE_SSL_REDIRECT", "false").lower() in (
-    "1",
-    "true",
-    "yes",
-)
-SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE", "false").lower() in (
-    "1",
-    "true",
-    "yes",
-)
-CSRF_COOKIE_SECURE = os.environ.get("CSRF_COOKIE_SECURE", "false").lower() in (
-    "1",
-    "true",
-    "yes",
-)
-SECURE_HSTS_SECONDS = int(os.environ.get("SECURE_HSTS_SECONDS", "0"))
-SECURE_HSTS_INCLUDE_SUBDOMAINS = os.environ.get(
-    "SECURE_HSTS_INCLUDE_SUBDOMAINS", "false"
-).lower() in ("1", "true", "yes")
+SECURE_SSL_REDIRECT = _get_bool_env("SECURE_SSL_REDIRECT", not DEBUG)
+SESSION_COOKIE_SECURE = _get_bool_env("SESSION_COOKIE_SECURE", not DEBUG)
+CSRF_COOKIE_SECURE = _get_bool_env("CSRF_COOKIE_SECURE", not DEBUG)
+SECURE_HSTS_SECONDS = int(os.environ.get("SECURE_HSTS_SECONDS", "31536000" if not DEBUG else "0"))
+SECURE_HSTS_INCLUDE_SUBDOMAINS = _get_bool_env("SECURE_HSTS_INCLUDE_SUBDOMAINS", not DEBUG)
