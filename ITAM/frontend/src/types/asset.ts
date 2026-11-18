@@ -1,4 +1,10 @@
-export type AssetStatus = 'available' | 'assigned' | 'retired' | 'disposed' | 'lost' | 'damaged' | 'in-use' | 'ready' | 'maintenance';
+export type AssetStatus =
+  | 'available'
+  | 'assigned'
+  | 'maintenance'
+  | 'disposed'
+  | 'retired'
+  | 'lost';
 export type AssetCategory = 'laptop' | 'desktop' | 'monitor' | 'server' | 'phone' | 'tablet' | 'network' | 'equipment' | 'other';
 export type AssetCondition = 'excellent' | 'good' | 'fair' | 'poor';
 export type AssignmentStatus =
@@ -86,15 +92,12 @@ export const categoryLabels: Record<AssetCategory, string> = {
 };
 
 export const statusLabels: Record<AssetStatus, string> = {
-  'available': 'Available',
-  'assigned': 'Assigned',
-  'in-use': 'In Use',
-  'ready': 'Ready',
-  'maintenance': 'Under Maintenance',
-  'retired': 'Retired',
-  'disposed': 'Disposed',
-  'lost': 'Lost',
-  'damaged': 'Damaged',
+  available: 'Available',
+  assigned: 'Assigned',
+  maintenance: 'under maintenance',
+  disposed: 'Disposed',
+  retired: 'Retired',
+  lost: 'Lost',
 };
 
 export const assignmentStatusLabels: Record<string, string> = {
@@ -105,7 +108,7 @@ export const assignmentStatusLabels: Record<string, string> = {
   returned: 'Returned',
   overdue: 'Overdue',
   available: 'Available',
-  maintenance: 'Under Maintenance',
+  maintenance: 'under maintenance',
   retired: 'Retired',
   disposed: 'Disposed',
   lost: 'Lost',

@@ -55,6 +55,13 @@ export default function Assets() {
   }, [searchParams]);
 
   useEffect(() => {
+    if (searchParams.get('openAdd') === 'true') {
+      setSelectedAsset(null);
+      setFormDialogOpen(true);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
     const onRoleChanged = () => setRole(getCurrentUserRole());
     window.addEventListener('asset-buddy-role-changed', onRoleChanged);
     return () => window.removeEventListener('asset-buddy-role-changed', onRoleChanged);

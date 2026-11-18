@@ -25,20 +25,16 @@ def _write_csv(headers: list[str], rows: list[list]) -> io.BytesIO:
 
 def generate_asset_report() -> io.BytesIO:
     """Generate Asset Report: Asset Tag, Asset Name, Category, Status, Location."""
-    headers = ["Asset Tag", "Asset Name", "Category", "Status", "Location", "Purchase Cost", "Depreciated Amount", "Current Value"]
+    headers = ["Asset Tag", "Asset Name", "Category", "Status", "Location"]
     assets = Asset.objects.select_related("location").all().order_by("tag")
     rows = []
     for asset in assets:
-        depr = asset.calculate_depreciation() or {}
         rows.append([
             asset.tag,
             asset.name,
             asset.get_category_display(),
             asset.get_status_display(),
-            asset.location.name,
-            getattr(asset.purchase_cost, 'quantize', lambda x: asset.purchase_cost) if asset.purchase_cost is not None else '',
-            depr.get('depreciated_value', ''),
-            depr.get('current_value', ''),
+            asset.location.name if asset.location else "",
         ])
     return _write_csv(headers, rows)
 

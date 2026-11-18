@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { getBulkAssetStatusOptions, getVisibleAssetStatusOptions } from '../bulkAssetFormUtils';
 
 describe('getVisibleAssetStatusOptions', () => {
-  it('excludes ready and assigned from the selectable status list', () => {
+  it('shows only the canonical asset status list', () => {
     const labels = {
       available: 'Available',
       assigned: 'Assigned',
@@ -19,12 +19,11 @@ describe('getVisibleAssetStatusOptions', () => {
 
     expect(options).toEqual([
       ['available', 'Available'],
-      ['in-use', 'In Use'],
+      ['assigned', 'Assigned'],
       ['maintenance', 'Under Maintenance'],
       ['retired', 'Retired'],
       ['disposed', 'Disposed'],
       ['lost', 'Lost'],
-      ['damaged', 'Damaged'],
     ]);
   });
 
@@ -39,7 +38,7 @@ describe('getVisibleAssetStatusOptions', () => {
 
     expect(getBulkAssetStatusOptions(labels)).toEqual([
       ['available', 'Available'],
-      ['in-use', 'In Use'],
+      ['assigned', 'Assigned'],
       ['maintenance', 'Under Maintenance'],
     ]);
   });

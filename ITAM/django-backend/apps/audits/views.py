@@ -1,6 +1,9 @@
 # django-backend/apps/audits/views.py
 
 import io
+import json
+import re
+from urllib.parse import parse_qs, urlparse
 
 from django.http import FileResponse, HttpResponse
 from django.utils import timezone
@@ -21,6 +24,47 @@ from .services import (
     _refresh_session_counts,
 )
 from config.permissions import IsAuditor
+
+
+def _extract_asset_tag(raw_value):
+    if raw_value is None:
+        return ""
+
+    value = str(raw_value).strip()
+    if not value:
+        return ""
+
+    candidates = {value}
+
+    try:
+        parsed = json.loads(value)
+        if isinstance(parsed, dict):
+            for key in ("assetTag", "tag", "id"):
+                if key in parsed and parsed[key] is not None:
+                    candidates.add(str(parsed[key]).strip())
+    except (TypeError, ValueError):
+        pass
+
+    try:
+        parsed_url = urlparse(value)
+        if parsed_url.scheme and parsed_url.netloc:
+            params = parse_qs(parsed_url.query)
+            for key in ("assetTag", "tag", "id"):
+                if key in params and params[key]:
+                    candidates.add(str(params[key][0]).strip())
+    except ValueError:
+        pass
+
+    for candidate in candidates:
+        candidate = str(candidate).strip()
+        if not candidate:
+            continue
+        if re.fullmatch(r"AW-[A-Z]{3}-\d{4}", candidate, flags=re.IGNORECASE):
+            return candidate
+        if candidate.upper().startswith("AW-"):
+            return candidate
+
+    return next((str(candidate).strip() for candidate in candidates if str(candidate).strip()), value)
 
 
 class AuditSessionViewSet(viewsets.ModelViewSet):
@@ -63,7 +107,8 @@ class AuditSessionViewSet(viewsets.ModelViewSet):
     def scan(self, request, pk=None):
         """Scan/verify an asset by tag in the current audit session."""
         session = self.get_object()
-        asset_tag = (request.data.get("asset_tag") or request.data.get("tag") or "").strip()
+        raw_asset_tag = request.data.get("asset_tag") or request.data.get("tag") or ""
+        asset_tag = _extract_asset_tag(raw_asset_tag)
         if not asset_tag:
             return Response({"detail": "asset_tag is required"}, status=status.HTTP_400_BAD_REQUEST)
 

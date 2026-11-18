@@ -26,6 +26,10 @@ import openpyxl
 import io
 from django.db import transaction
 from django.http import HttpResponse
+from django.db.models import Sum
+from django.core.exceptions import ValidationError as DjangoValidationError
+
+from apps.attachments.models import Attachment
 
 
 class AssetFilter(filters.FilterSet):
@@ -50,9 +54,21 @@ class AssetViewSet(viewsets.ModelViewSet):
     search_fields = ("name", "tag", "serial_number", "model", "department")
     ordering_fields = ("name", "tag", "status", "created_at", "updated_at")
 
+    def create(self, request, *args, **kwargs):
+        try:
+            return super().create(request, *args, **kwargs)
+        except DjangoValidationError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    def update(self, request, *args, **kwargs):
+        try:
+            return super().update(request, *args, **kwargs)
+        except DjangoValidationError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
     def get_queryset(self):
         qs = super().get_queryset()
-        include_retired = self.request.query_params.get("include_retired", "false").lower() in (
+        include_retired = self.request.query_params.get("include_retired", "true").lower() in (
             "1",
             "true",
             "yes",
@@ -121,6 +137,41 @@ class AssetViewSet(viewsets.ModelViewSet):
         )
         notify_asset_retired(asset)
         return Response(AssetSerializer(asset).data)
+
+    @action(detail=False, methods=["delete"], permission_classes=[IsITStaffOrAdmin], url_path="delete-all")
+    def delete_all(self, request):
+        """DELETE /api/assets/delete-all/ — permanently remove all assets."""
+        deleted_count, _ = Asset.objects.all().delete()
+        return Response({"deleted": deleted_count}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"], url_path="storage-summary")
+    def storage_summary(self, request):
+        """GET /api/assets/storage-summary/ — actual storage used by asset attachments."""
+        used_bytes = Attachment.objects.aggregate(total=Sum("file_size"))["total"] or 0
+        limit_bytes = 10 * 1024 * 1024 * 1024
+
+        def format_bytes(value):
+            units = ["B", "KB", "MB", "GB", "TB"]
+            size = float(value)
+            unit_index = 0
+            while size >= 1024 and unit_index < len(units) - 1:
+                size /= 1024
+                unit_index += 1
+            if unit_index == 0:
+                return f"{int(size)} {units[unit_index]}"
+            return f"{size:.1f} {units[unit_index]}"
+
+        used_percent = min(100, round((used_bytes / limit_bytes) * 100, 1)) if limit_bytes else 0
+
+        return Response({
+            "used_bytes": int(used_bytes),
+            "used_human": format_bytes(used_bytes),
+            "limit_bytes": int(limit_bytes),
+            "limit_human": format_bytes(limit_bytes),
+            "used_percent": used_percent,
+            "attachment_count": Attachment.objects.count(),
+            "asset_count": Asset.objects.count(),
+        })
 
     @action(detail=False, methods=["get"])
     def specs_config(self, request):

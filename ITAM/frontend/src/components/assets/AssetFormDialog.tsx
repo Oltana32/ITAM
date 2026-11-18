@@ -52,7 +52,7 @@ Object.values(CATEGORY_SPECS).forEach((categorySpecs) => {
   });
 });
 
-const visibleStatusValues = ['available', 'maintenance', 'retired', 'disposed', 'lost', 'damaged'] as const;
+const visibleStatusValues = ['available', 'maintenance', 'retired', 'disposed', 'lost'] as const;
 
 const assetFormSchema = z.object({
   name: z.string().min(1, 'Name is required').max(100),
@@ -105,10 +105,7 @@ export function AssetFormDialog({ open, onOpenChange, asset, onSubmit, onOpenBul
 
   const selectedCategory = form.watch('category') as AssetCategory;
   const categorySpecs = getSpecsForCategory(selectedCategory);
-  const statusOptions =
-    isEditing && asset?.status === 'in_use'
-      ? ['in-use', 'maintenance', 'retired', 'disposed', 'lost', 'damaged']
-      : getVisibleAssetStatusOptions(statusLabels).map(([value]) => String(value));
+  const statusOptions = getVisibleAssetStatusOptions(statusLabels).map(([value]) => String(value));
 
   useEffect(() => {
     const loadManufacturers = async () => {
@@ -162,10 +159,17 @@ export function AssetFormDialog({ open, onOpenChange, asset, onSubmit, onOpenBul
     }
   }, [asset, form]);
 
-  // Reset specs when category changes
+  // Keep the existing specs for the current asset unless the user changes category.
   useEffect(() => {
-    form.setValue('specs', {});
-  }, [selectedCategory, form]);
+    if (!asset && selectedCategory) {
+      form.setValue('specs', {});
+      return;
+    }
+
+    if (asset && selectedCategory !== asset.category) {
+      form.setValue('specs', {});
+    }
+  }, [selectedCategory, asset, form]);
 
   const handleSubmit = async (data: AssetFormValues) => {
     try {

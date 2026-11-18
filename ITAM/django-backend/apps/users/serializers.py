@@ -4,6 +4,14 @@ from rest_framework import serializers
 from .models import User, UserRole
 
 
+def build_awashwine_email(first_name: str | None, last_name: str | None) -> str:
+    name = (first_name or last_name or "").strip()
+    if not name:
+        return ""
+    cleaned = "".join(name.lower().split())
+    return f"{cleaned}@awashwine.com"
+
+
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
@@ -24,6 +32,7 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class UserCreateSerializer(serializers.ModelSerializer):
+    email = serializers.EmailField(required=False, allow_blank=True)
     password = serializers.CharField(write_only=True, min_length=8)
 
     class Meta:
@@ -38,6 +47,17 @@ class UserCreateSerializer(serializers.ModelSerializer):
             "avatar",
             "must_change_password",
         )
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        email = (attrs.get("email") or "").strip()
+        if not email:
+            generated = build_awashwine_email(attrs.get("first_name"), attrs.get("last_name"))
+            if generated:
+                attrs["email"] = generated
+            else:
+                raise serializers.ValidationError({"email": "This field is required."})
+        return attrs
 
     def validate_password(self, value: str) -> str:
         validate_password(value)

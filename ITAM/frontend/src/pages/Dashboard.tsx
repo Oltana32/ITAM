@@ -18,17 +18,24 @@ import { AssetCategory, AssetStatus } from '@/types/asset';
 import awashLogo from '@/assets/awash-wine-logo.png';
 import { useAssets } from '@/hooks/useAssets';
 
+function toSafeCurrencyNumber(value: unknown): number {
+  if (value === null || value === undefined || value === '') return 0;
+  const parsed = typeof value === 'string' ? Number(value.trim()) : Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 export default function Dashboard() {
   const { assets } = useAssets();
   // Placeholder to register file access; no-op intentional.
   const totalAssets = assets.length;
-  const inUseAssets = assets.filter((a) => a.status === 'in-use').length;
+  const activeStatusSet = new Set(['assigned', 'available', 'maintenance']);
+  const activeAssets = assets.filter((a) => activeStatusSet.has(a.status)).length;
   const maintenanceAssets = assets.filter((a) => a.status === 'maintenance').length;
-  const availableAssets = assets.filter((a) => a.status === 'available').length;
+  const unassignedAssets = assets.filter((a) => !a.assignedTo && !['retired', 'disposed', 'lost'].includes(a.status)).length;
   const retiredAssets = assets.filter((a) => a.status === 'retired').length;
-  const unassignedAssets = assets.filter((a) => !a.assignedTo).length;
-  const utilizationRate = totalAssets ? Math.round((inUseAssets / totalAssets) * 100) : 0;
-  const totalValue = assets.reduce((s, a) => s + ((a.currentValue ?? a.purchaseCost) || 0), 0);
+  const availableAssets = assets.filter((a) => a.status === 'available').length;
+  const utilizationRate = totalAssets ? Math.round((activeAssets / totalAssets) * 100) : 0;
+  const totalValue = assets.reduce((s, a) => s + toSafeCurrencyNumber(a.currentValue ?? a.purchaseCost), 0);
 
   const totalValueFormatted = new Intl.NumberFormat('en-ET', {
     style: 'currency',
@@ -58,15 +65,22 @@ export default function Dashboard() {
     }, {} as Record<AssetCategory, number>)
   ).map(([category, count]) => ({ category: category as AssetCategory, count }));
 
-  const statusData: { status: AssetStatus; count: number }[] = [
-    { status: 'in-use', count: inUseAssets },
-    { status: 'available', count: availableAssets },
-    { status: 'maintenance', count: maintenanceAssets },
-    { status: 'retired', count: retiredAssets },
+  const statusOrder: AssetStatus[] = [
+    'available',
+    'assigned',
+    'maintenance',
+    'retired',
+    'disposed',
+    'lost',
   ];
 
+  const statusData: { status: AssetStatus; count: number }[] = statusOrder.map((status) => ({
+    status,
+    count: assets.filter((asset) => asset.status === status).length,
+  }));
+
   const quickActions = [
-    { label: 'Add Asset', icon: Plus, href: '/assets', color: 'from-primary to-primary/70' },
+    { label: 'Add Asset', icon: Plus, href: '/assets?openAdd=true', color: 'from-primary to-primary/70' },
     { label: 'Scan QR', icon: ScanLine, href: '/assets', color: 'from-[hsl(var(--chart-2))] to-[hsl(var(--chart-2))]/70' },
     { label: 'Reports', icon: BarChart3, href: '/reports', color: 'from-[hsl(var(--chart-5))] to-[hsl(var(--chart-5))]/70' },
     { label: 'Maintenance', icon: Wrench, href: '/maintenance', color: 'from-[hsl(var(--chart-3))] to-[hsl(var(--chart-3))]/70' },
@@ -116,7 +130,7 @@ export default function Dashboard() {
         {/* Stats Grid */}
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <StatCard title="Total Assets" value={totalAssets} icon={<Package className="h-5 w-5" />} trend={{ value: 12, label: 'from last month' }} index={0} />
-          <StatCard title="Active" value={inUseAssets} icon={<CheckCircle className="h-5 w-5" />} trend={{ value: 5, label: 'assigned' }} index={1} />
+          <StatCard title="Active" value={activeAssets} icon={<CheckCircle className="h-5 w-5" />} trend={{ value: utilizationRate, label: 'utilization' }} index={1} />
           <StatCard title="Expiring soon" value={expiringSoon} icon={<ShieldAlert className="h-5 w-5" />} trend={{ value: expiringSoon, label: 'within 90 days' }} index={2} />
           <StatCard title="Unassigned" value={unassignedAssets} icon={<Archive className="h-5 w-5" />} index={3} />
         </div>

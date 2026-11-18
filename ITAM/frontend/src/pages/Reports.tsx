@@ -22,6 +22,18 @@ function normalizeStatus(value?: string) {
   return String(value ?? '').trim().toLowerCase().replace(/\s+/g, '-');
 }
 
+function parseAssetValue(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const normalized = value.replace(/[^0-9.-]+/g, '').trim();
+    if (!normalized) return 0;
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  if (typeof value === 'bigint') return Number(value);
+  return 0;
+}
+
 function isActiveAssetStatus(value?: string) {
   const status = normalizeStatus(value);
   return status === 'in-use' || status === 'assigned' || status === 'active';
@@ -124,7 +136,7 @@ export default function Reports() {
     () => Object.entries(
       assets.reduce((acc, asset) => {
         const department = asset.department || 'Unassigned';
-        const assetValue = asset.currentValue ?? asset.purchaseCost ?? 0;
+        const assetValue = parseAssetValue(asset.currentValue ?? asset.purchaseCost ?? 0);
         acc[department] = (acc[department] || 0) + assetValue;
         return acc;
       }, {} as Record<string, number>)
@@ -133,7 +145,7 @@ export default function Reports() {
   );
 
   const totalValue = useMemo(
-    () => assets.reduce((sum, asset) => sum + (asset.currentValue ?? asset.purchaseCost ?? 0), 0),
+    () => assets.reduce((sum, asset) => sum + parseAssetValue(asset.currentValue ?? asset.purchaseCost ?? 0), 0),
     [assets]
   );
   const activeAssets = useMemo(() => assets.filter((asset) => isActiveAssetStatus(asset.status)).length, [assets]);
@@ -227,7 +239,7 @@ export default function Reports() {
               </CardContent></Card>
               <Card className="card-hover"><CardContent className="pt-5">
                 <p className="text-xs text-muted-foreground">Total Value</p>
-                <p className="text-2xl font-bold">ETB {(totalValue / 1000000).toFixed(1)}M</p>
+                <p className="text-2xl font-bold">{new Intl.NumberFormat('en-ET', { style: 'currency', currency: 'ETB', maximumFractionDigits: 0 }).format(totalValue || 0)}</p>
                 <p className="text-xs text-[hsl(var(--chart-3))]">Based on current asset value</p>
               </CardContent></Card>
               <Card className="card-hover"><CardContent className="pt-5">

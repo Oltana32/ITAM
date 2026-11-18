@@ -20,16 +20,36 @@ export interface ActivityEntry {
   user?: string;
 }
 
-let _entries: ActivityEntry[] = [];
+const STORAGE_KEY = 'assetBuddy.activity.entries';
+
+const readStoredEntries = (): ActivityEntry[] => {
+  if (typeof window === 'undefined') return [];
+
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+let _entries: ActivityEntry[] = readStoredEntries();
 const _listeners = new Set<(e: ActivityEntry[]) => void>();
-const _emit = () => _listeners.forEach((l) => l(_entries));
+const _emit = () => {
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(_entries));
+  }
+  _listeners.forEach((l) => l(_entries));
+};
 let _loaded = false;
 
 export function useActivityLog() {
   const [entries, setEntries] = useState<ActivityEntry[]>(_entries);
 
   const fetchEntries = useCallback(async () => {
-    const data = _entries;
+    const data = readStoredEntries();
     _entries = data;
     _loaded = true;
     _emit();
@@ -48,18 +68,26 @@ export function useActivityLog() {
   }, [fetchEntries]);
 
   const log = useCallback((entry: Omit<ActivityEntry, 'id' | 'timestamp'>) => {
+    const settings = typeof window !== 'undefined' ? JSON.parse(window.localStorage.getItem('itam_settings') ?? '{}') : {};
+    if (settings.logUserActions === false) {
+      return;
+    }
+
     const saved: ActivityEntry = {
       ...entry,
       id: generateUuid(),
       timestamp: new Date().toISOString(),
       user: entry.user || 'System',
     };
-    _entries = [saved, ..._entries.filter((e) => e.id !== saved.id)];
+    _entries = [saved, ..._entries.filter((e) => e.id !== saved.id)].slice(0, 200);
     _emit();
   }, []);
 
   const clear = useCallback(() => {
     _entries = [];
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(STORAGE_KEY);
+    }
     _emit();
   }, []);
 

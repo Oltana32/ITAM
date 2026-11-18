@@ -14,10 +14,10 @@ export interface AuthUser {
 }
 
 // Django API base URL.
-// Local development: VITE_API_URL can be empty, so requests use the same host.
-// Render: VITE_API_URL=https://awash-itam-api.onrender.com
+// By default, requests should stay on the current host so the app works under /ITAM
+// without generating /ITAM/api URLs that the reverse proxy does not serve.
+// Provide VITE_API_URL only when targeting an external backend.
 const API_URL = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
-
 /**
  * Converts a frontend API path such as:
  *   /api/assets/
@@ -347,10 +347,37 @@ export async function authFetch(
     );
   }
 
-  return fetch(apiUrl(input), {
+  let response = await fetch(apiUrl(input), {
     ...init,
     headers,
   });
+
+  if (response.status !== 401) {
+    return response;
+  }
+
+  const newAccess = await tryRefreshToken();
+
+  if (!newAccess) {
+    clearAuthSession();
+    return response;
+  }
+
+  const retryHeaders = new Headers(
+    init?.headers ?? {}
+  );
+
+  retryHeaders.set(
+    "Authorization",
+    `Bearer ${newAccess}`
+  );
+
+  response = await fetch(apiUrl(input), {
+    ...init,
+    headers: retryHeaders,
+  });
+
+  return response;
 }
 
 // Fetch-based refresh flow for 401 responses.
@@ -405,39 +432,5 @@ export async function authFetchWithRefresh(
   input: RequestInfo | URL,
   init?: RequestInit
 ): Promise<Response> {
-  let response = await authFetch(
-    input,
-    init
-  );
-
-  if (response.status !== 401) {
-    return response;
-  }
-
-  const newAccess =
-    await tryRefreshToken();
-
-  if (!newAccess) {
-    clearAuthSession();
-    return response;
-  }
-
-  const headers = new Headers(
-    init?.headers ?? {}
-  );
-
-  headers.set(
-    "Authorization",
-    `Bearer ${newAccess}`
-  );
-
-  response = await fetch(
-    apiUrl(input),
-    {
-      ...init,
-      headers,
-    }
-  );
-
-  return response;
+  return authFetch(input, init);
 }

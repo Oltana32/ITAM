@@ -121,9 +121,9 @@ class AssetSerializer(serializers.ModelSerializer):
         return instance.calculate_depreciation()
 
     def validate_status(self, value: str) -> str:
-        if value == AssetStatus.IN_USE:
+        if value in {AssetStatus.ASSIGNED, AssetStatus.IN_USE}:
             raise serializers.ValidationError(
-                "Asset in use must be managed through the assignment workflow."
+                "Asset assignment status must be managed through the assignment workflow."
             )
 
         current_status = getattr(self.instance, "status", None)

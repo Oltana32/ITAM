@@ -5,29 +5,27 @@ from apps.core.constants import AssetStatus, VALID_STATUS_TRANSITIONS
 
 
 def validate_status_transition(current_status: str, new_status: str) -> None:
-    """
-    Validate that status transition is allowed.
-    
-    Raises:
-        ValidationError: If transition is not allowed
-    """
+    """Validate that status transition is allowed."""
     if current_status == new_status:
-        return  # Same status is always OK
+        return
 
     if current_status in {AssetStatus.ASSIGNED, AssetStatus.IN_USE} and new_status == AssetStatus.AVAILABLE:
         raise ValidationError(
             "Asset is currently assigned or in use. Mark it available only via the asset assignment return workflow."
         )
 
+    if current_status == AssetStatus.DISPOSED:
+        raise ValidationError("Disposed assets cannot be changed to another status.")
+
     if current_status not in VALID_STATUS_TRANSITIONS:
         raise ValidationError(f"Unknown current status: {current_status}")
-    
+
     allowed_statuses = VALID_STATUS_TRANSITIONS[current_status]
-    
+
     if new_status not in allowed_statuses:
         raise ValidationError(
             f"Cannot transition from {current_status} to {new_status}. "
-            f"Allowed transitions: {', '.join(allowed_statuses)}"
+            f"Allowed transitions: {', '.join(allowed_statuses) if allowed_statuses else 'none'}"
         )
 
 

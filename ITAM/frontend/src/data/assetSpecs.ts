@@ -37,6 +37,8 @@ export const OS_OPTIONS = [
   'Red Hat Enterprise Linux',
 ];
 
+export const PHONE_OS_OPTIONS = ['iOS', 'Android'];
+
 export const PRINTER_TYPE_OPTIONS = [
   'Laser',
   'Inkjet',
@@ -225,13 +227,7 @@ export const CATEGORY_SPECS: Record<string, CategorySpecs> = {
       os: {
         label: 'Operating System',
         type: 'select',
-        options: OS_OPTIONS,
-        required: false,
-      },
-      screen_size: {
-        label: 'Screen Size',
-        type: 'select',
-        options: SCREEN_SIZE_OPTIONS,
+        options: PHONE_OS_OPTIONS,
         required: false,
       },
     },

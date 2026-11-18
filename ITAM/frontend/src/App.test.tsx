@@ -96,7 +96,7 @@ vi.mock('./lib/authRole', async () => {
 
 describe('App routing', () => {
   beforeEach(() => {
-    window.history.pushState({}, '', '/');
+    window.history.pushState({}, '', '/ITAM/');
   });
 
   it('renders the dashboard for authenticated users at the root path', async () => {

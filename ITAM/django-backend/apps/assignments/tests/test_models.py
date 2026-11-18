@@ -206,7 +206,21 @@ class AssignmentLifecycleTests(TestCase):
         # Check asset status was updated
         self.asset.refresh_from_db()
         self.assertEqual(self.asset.status, AssetStatus.RETURNED)
+
+    def test_assigned_asset_can_transition_to_returned(self):
+        """Assigned assets must be allowed to move into the returned state for the return workflow."""
+        from apps.assets.validators import validate_status_transition
+
+        validate_status_transition(AssetStatus.ASSIGNED, AssetStatus.RETURNED)
     
+    def test_cannot_return_assignment_that_is_not_active(self):
+        """Only active assignments can be returned."""
+        self.assignment.status = AssetStatus.AVAILABLE
+        self.assignment.save(update_fields=["status", "updated_at"])
+
+        with self.assertRaises(ValidationError):
+            self.assignment.return_asset(condition='good', returned_by=self.admin)
+
     def test_cannot_return_already_returned_assignment(self):
         """Test that already returned assets cannot be returned again."""
         # Return the assignment

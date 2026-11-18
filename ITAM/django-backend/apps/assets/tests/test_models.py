@@ -2,10 +2,14 @@
 # Place this in: apps/assets/tests/test_models.py
 
 import pytest
+from decimal import Decimal
 from django.test import TestCase
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.core.files.base import ContentFile
+from rest_framework.test import APIClient
 from apps.assets.models import Asset, AssetStatusHistory
+from apps.attachments.models import Attachment
 from apps.core.constants import AssetStatus
 from apps.manufacturers.models import Manufacturer
 from apps.locations.models import Location
@@ -67,7 +71,37 @@ class AssetStatusTransitionTests(TestCase):
         # Try to transition to AVAILABLE (should fail)
         with self.assertRaises(ValidationError):
             self.asset.change_status(AssetStatus.AVAILABLE, changed_by=self.user)
-    
+
+    def test_invalid_api_transition_returns_400_message(self):
+        """Invalid status updates should return a clean validation error instead of a server error."""
+        self.asset.status = AssetStatus.DISPOSED
+        self.asset.save()
+
+        client = APIClient()
+        client.force_authenticate(user=self.user)
+        response = client.patch(
+            f"/api/assets/{self.asset.id}/",
+            {"status": AssetStatus.AVAILABLE},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Disposed assets cannot be changed", response.data["detail"])
+
+    def test_asset_assigned_status_must_be_set_via_assignment_workflow(self):
+        """Direct asset updates cannot mark an asset as assigned; assignment page owns that transition."""
+        client = APIClient()
+        client.force_authenticate(user=self.user)
+
+        response = client.patch(
+            f"/api/assets/{self.asset.id}/",
+            {"status": AssetStatus.ASSIGNED},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("assignment workflow", response.data["status"][0])
+
     def test_status_history_created(self):
         """Test that status changes are recorded in history."""
         initial_count = self.asset.status_history.count()
@@ -87,7 +121,47 @@ class AssetStatusTransitionTests(TestCase):
         self.assertEqual(latest.to_status, AssetStatus.MAINTENANCE)
         self.assertEqual(latest.changed_by, self.user)
         self.assertEqual(latest.reason, 'Preventive maintenance')
+
+    def test_delete_all_assets_endpoint_removes_all_records(self):
+        """The settings data reset should delete all assets via the API."""
+        Asset.objects.create(
+            name='Second Laptop',
+            tag='TAG002',
+            serial_number='SN002',
+            category='laptop',
+            manufacturer=self.manufacturer,
+            location=self.location,
+            created_by=self.user,
+        )
+
+        client = APIClient()
+        client.force_authenticate(user=self.user)
+        response = client.delete('/api/assets/delete-all/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Asset.objects.count(), 0)
+        self.assertEqual(response.data['deleted'], 2)
     
+    def test_storage_summary_uses_real_attachment_size(self):
+        """The settings data panel should show actual storage used by uploaded files."""
+        Attachment.objects.create(
+            asset=self.asset,
+            file=ContentFile(b'12345', name='sample.txt'),
+            file_name='sample.txt',
+            file_size=5,
+            mime_type='text/plain',
+            title='Sample upload',
+        )
+
+        client = APIClient()
+        client.force_authenticate(user=self.user)
+        response = client.get('/api/assets/storage-summary/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['used_bytes'], 5)
+        self.assertEqual(response.data['used_human'], '5 B')
+        self.assertGreaterEqual(response.data['used_percent'], 0)
+
     def test_asset_availability_check(self):
         """Test is_available_for_assignment property."""
         # Available status should be assignable
@@ -115,3 +189,57 @@ class AssetStatusTransitionTests(TestCase):
 
         with self.assertRaises(ValidationError):
             self.asset.change_status(AssetStatus.AVAILABLE, changed_by=self.user)
+
+    def test_terminal_statuses_default_to_poor_and_zero_value(self):
+        """Retired and disposed assets should be visible and treated as low-value inventory."""
+        self.asset.purchase_cost = Decimal('2500.00')
+        self.asset.condition = 'good'
+        self.asset.status = AssetStatus.RETIRED
+        self.asset.save()
+
+        self.asset.refresh_from_db()
+        self.assertEqual(self.asset.status, AssetStatus.RETIRED)
+        self.assertEqual(self.asset.condition, 'poor')
+        self.assertEqual(self.asset.purchase_cost, Decimal('0.00'))
+
+        second = Asset.objects.create(
+            name='Disposed Laptop',
+            tag='TAG002',
+            serial_number='SN002',
+            category='laptop',
+            manufacturer=self.manufacturer,
+            location=self.location,
+            created_by=self.user,
+            purchase_cost=Decimal('1800.00'),
+            condition='excellent',
+            status=AssetStatus.DISPOSED,
+        )
+        second.refresh_from_db()
+        self.assertEqual(second.condition, 'poor')
+        self.assertEqual(second.purchase_cost, Decimal('0.00'))
+
+    def test_retired_and_lost_statuses_restore_value_when_recovered(self):
+        """Retired and lost assets zero out value while inactive but restore on reactivation."""
+        self.asset.purchase_cost = Decimal('3200.00')
+        self.asset.condition = 'good'
+        self.asset.save()
+
+        self.asset.status = AssetStatus.RETIRED
+        self.asset.save()
+        self.asset.refresh_from_db()
+        self.assertEqual(self.asset.purchase_cost, Decimal('0.00'))
+
+        self.asset.status = AssetStatus.AVAILABLE
+        self.asset.save()
+        self.asset.refresh_from_db()
+        self.assertEqual(self.asset.purchase_cost, Decimal('3200.00'))
+
+        self.asset.status = AssetStatus.LOST
+        self.asset.save()
+        self.asset.refresh_from_db()
+        self.assertEqual(self.asset.purchase_cost, Decimal('0.00'))
+
+        self.asset.status = AssetStatus.AVAILABLE
+        self.asset.save()
+        self.asset.refresh_from_db()
+        self.assertEqual(self.asset.purchase_cost, Decimal('3200.00'))

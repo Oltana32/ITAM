@@ -1,3 +1,4 @@
+﻿import { useEffect } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -25,6 +26,69 @@ import { canAccessPath, getDefaultPath } from "./lib/permissions";
 import { isAuthenticated } from "./lib/auth";
 
 const queryClient = new QueryClient();
+
+function AutoSessionTimeout() {
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const getSettings = () => {
+      try {
+        return JSON.parse(window.localStorage.getItem('itam_settings') ?? '{}');
+      } catch {
+        return {};
+      }
+    };
+
+    const logout = () => {
+      window.localStorage.removeItem('assetBuddy.auth.accessToken');
+      window.localStorage.removeItem('assetBuddy.auth.refreshToken');
+      window.localStorage.removeItem('assetBuddy.auth.user');
+      window.location.href = '/ITAM/login';
+    };
+
+    let timeoutHandle: number | undefined;
+
+    const resetTimer = () => {
+      if (typeof timeoutHandle !== 'undefined') {
+        window.clearTimeout(timeoutHandle);
+      }
+
+      const settings = getSettings();
+      if (settings.autoTimeout !== true) {
+        return;
+      }
+
+      const minutes = Number(settings.sessionTimeout ?? 30);
+      const timeoutMs = Number.isFinite(minutes) && minutes > 0 ? minutes * 60 * 1000 : 30 * 60 * 1000;
+      timeoutHandle = window.setTimeout(logout, timeoutMs);
+    };
+
+    const events: Array<keyof WindowEventMap> = ['click', 'keydown', 'mousemove', 'scroll', 'touchstart'];
+    events.forEach((eventName) => window.addEventListener(eventName, resetTimer));
+    resetTimer();
+
+    return () => {
+      if (typeof timeoutHandle !== 'undefined') {
+        window.clearTimeout(timeoutHandle);
+      }
+      events.forEach((eventName) => window.removeEventListener(eventName, resetTimer));
+    };
+  }, []);
+
+  return null;
+}
+
+function NormalizeBasePath() {
+  if (typeof window !== 'undefined') {
+    const url = new URL(window.location.href);
+    if (url.pathname === '/ITAM' || url.pathname === '/ITAM') {
+      url.pathname = '/ITAM/';
+      window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+    }
+  }
+
+  return null;
+}
 
 function ProtectedRoute({ path, children }: { path: string; children: JSX.Element }) {
   if (!isAuthenticated()) {
@@ -58,7 +122,9 @@ const App = () => (
       <TooltipProvider>
         <Toaster />
         <Sonner />
-        <BrowserRouter>
+        <BrowserRouter basename="/ITAM">
+          <NormalizeBasePath />
+          <AutoSessionTimeout />
           <CommandPalette />
           <Routes>
           <Route path="/login" element={<LoginRoute />} />
@@ -85,3 +151,4 @@ const App = () => (
 );
 
 export default App;
+

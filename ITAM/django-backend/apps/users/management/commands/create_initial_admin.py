@@ -1,6 +1,7 @@
 import os
 
 from django.core.management.base import BaseCommand
+
 from apps.users.models import User
 
 
@@ -8,17 +9,8 @@ class Command(BaseCommand):
     help = "Create or update the initial ITAM admin user"
 
     def handle(self, *args, **options):
-        email = os.environ.get("DJANGO_ADMIN_EMAIL")
-        password = os.environ.get("DJANGO_ADMIN_PASSWORD")
-
-        if not email or not password:
-            self.stdout.write(
-                self.style.WARNING(
-                    "DJANGO_ADMIN_EMAIL or DJANGO_ADMIN_PASSWORD is not set. "
-                    "Skipping admin creation."
-                )
-            )
-            return
+        email = os.environ.get("DJANGO_ADMIN_EMAIL", "admin@test.com")
+        password = os.environ.get("DJANGO_ADMIN_PASSWORD", "Admin@123")
 
         user, created = User.objects.get_or_create(
             email=email,
@@ -27,6 +19,7 @@ class Command(BaseCommand):
                 "is_staff": True,
                 "is_superuser": True,
                 "is_active": True,
+                "username": "admin",
             },
         )
 
@@ -34,18 +27,18 @@ class Command(BaseCommand):
         user.is_staff = True
         user.is_superuser = True
         user.is_active = True
+        if not user.username:
+            user.username = "admin"
         user.set_password(password)
         user.save()
 
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"Admin user ready: {email} / {password}"
+            )
+        )
+
         if created:
-            self.stdout.write(
-                self.style.SUCCESS(
-                    f"Initial admin user created: {email}"
-                )
-            )
+            self.stdout.write(self.style.SUCCESS("Initial admin user created."))
         else:
-            self.stdout.write(
-                self.style.SUCCESS(
-                    f"Initial admin user updated: {email}"
-                )
-            )
+            self.stdout.write(self.style.SUCCESS("Initial admin user updated."))

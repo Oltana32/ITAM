@@ -160,19 +160,30 @@ class Assignment(models.Model):
     def return_asset(self, condition: str = None, returned_by=None) -> None:
         """
         Mark assignment as returned.
-        
+
         Args:
             condition: Condition of asset on return
             returned_by: User processing the return
         """
-        if self.status in [AssetStatus.RETURNED, AssetStatus.RETIRED, AssetStatus.DISPOSED]:
+        active_statuses = {AssetStatus.ASSIGNED, AssetStatus.IN_USE}
+        terminal_statuses = {
+            AssetStatus.RETURNED,
+            AssetStatus.RETIRED,
+            AssetStatus.DISPOSED,
+            AssetStatus.LOST,
+        }
+
+        if self.status in terminal_statuses:
             raise ValidationError("Cannot return an already returned/retired asset")
-        
+
+        if self.status not in active_statuses:
+            raise ValidationError("Cannot return an assignment that is not currently active.")
+
         self.actual_return_date = timezone.now().date()
         self.condition_on_return = condition
         self.status = AssetStatus.RETURNED
         self.updated_by = returned_by
         self.save()
-        
+
         # Update asset status
         self.asset.change_status(AssetStatus.RETURNED, changed_by=returned_by)

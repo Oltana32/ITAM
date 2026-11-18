@@ -25,6 +25,12 @@ class MaintenanceLifecycleTests(TestCase):
         cls.user = User.objects.create_user(
             email="maintenance@test.com",
             password="testpass123",
+            role="finance",
+        )
+        cls.it_user = User.objects.create_user(
+            email="it@example.com",
+            password="testpass123",
+            role="it_team",
         )
 
     def create_asset(self, tag="MNT001", serial_number="MNT-SN001"):
@@ -37,6 +43,21 @@ class MaintenanceLifecycleTests(TestCase):
             location=self.location,
             created_by=self.user,
         )
+
+    def test_changing_asset_to_under_maintenance_creates_it_work_order(self):
+        asset = self.create_asset()
+
+        asset.change_status(AssetStatus.MAINTENANCE, changed_by=self.user)
+
+        record = MaintenanceRecord.objects.filter(
+            asset=asset,
+            type=MaintenanceType.PREVENTIVE,
+            status=MaintenanceStatus.IN_PROGRESS,
+        ).order_by("-created_at").first()
+
+        self.assertIsNotNone(record)
+        self.assertEqual(record.technician, self.it_user)
+        self.assertEqual(asset.status, AssetStatus.MAINTENANCE)
 
     def test_in_progress_maintenance_marks_asset_under_maintenance(self):
         asset = self.create_asset()

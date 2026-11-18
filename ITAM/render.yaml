@@ -8,17 +8,27 @@ services:
     env: python
     plan: free
     buildCommand: pip install -r django-backend/requirements.txt
-    startCommand: gunicorn config.wsgi:application --bind 0.0.0.0:$PORT
+    startCommand: gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --timeout 120 --keep-alive 5
     root: django-backend
     envVars:
       - key: DJANGO_SECRET_KEY
       - key: DJANGO_ALLOWED_HOSTS
+      - key: DJANGO_DEBUG
+        value: "false"
       - key: DATABASE_URL
       - key: POSTGRES_DB
       - key: POSTGRES_USER
       - key: POSTGRES_PASSWORD
       - key: POSTGRES_HOST
       - key: POSTGRES_PORT
+      - key: SECURE_SSL_REDIRECT
+        value: "true"
+      - key: SESSION_COOKIE_SECURE
+        value: "true"
+      - key: CSRF_COOKIE_SECURE
+        value: "true"
+      - key: SECURE_HSTS_SECONDS
+        value: "31536000"
     autoDeploy: true
 
   - type: static

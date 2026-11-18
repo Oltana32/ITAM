@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { format } from 'date-fns';
 import {
   ClipboardCheck, Plus, ScanLine, Download, FileSpreadsheet,
@@ -53,11 +53,13 @@ const auditTypeOptions = [
 export default function Audits() {
   const { data: sessions = [], isLoading } = useAuditSessions();
   const { locations } = useLocations();
+  const { departments } = useDepartments();
   const { createSession, startSession, scanAsset, completeSession } = useAuditMutations();
 
   const [activeSessionId, setActiveSessionId] = useState<number | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
+  const [manualTag, setManualTag] = useState('');
   const [form, setForm] = useState({
     departmentId: 'none',
     departmentFree: '',
@@ -66,8 +68,14 @@ export default function Audits() {
     audit_type: 'inventory',
     lead_auditor: 'none',
   });
-  const { departments } = useDepartments();
   const { users } = useUsers();
+  const hasDepartments = departments.length > 0;
+
+  useEffect(() => {
+    if (activeSessionId === null && sessions.length > 0) {
+      setActiveSessionId(sessions[0].id);
+    }
+  }, [activeSessionId, sessions]);
 
   const activeSession = useMemo(
     () => sessions.find((s) => s.id === activeSessionId) ?? null,
@@ -116,6 +124,27 @@ export default function Audits() {
     }
   };
 
+  const handleManualTagSubmit = async () => {
+    if (!activeSessionId) return;
+    const tag = extractAssetTag(manualTag);
+    if (!tag.trim()) {
+      toast.warning('Enter an asset tag to verify');
+      return;
+    }
+
+    try {
+      await scanAsset.mutateAsync({
+        sessionId: activeSessionId,
+        asset_tag: tag,
+      });
+      toast.success(`Verified: ${tag}`);
+      setManualTag('');
+      void refetchResults();
+    } catch (err) {
+      toast.warning(err instanceof Error ? err.message : 'Scan failed');
+    }
+  };
+
   const stats = results ?? activeSession?.stats ?? { expected: 0, verified: 0, missing: 0, progress_pct: 0 };
 
   return (
@@ -133,9 +162,31 @@ export default function Audits() {
           </div>
           <div className="flex gap-2">
             {activeSession?.status === 'in_progress' && (
-              <Button variant="outline" className="gap-2" onClick={() => setScannerOpen(true)}>
-                <ScanLine className="h-4 w-4" /> Scan Asset
-              </Button>
+              <>
+                <Button variant="outline" className="gap-2" onClick={() => setScannerOpen(true)}>
+                  <ScanLine className="h-4 w-4" /> Scan Asset
+                </Button>
+
+                <div className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5 shadow-sm">
+                  <Label htmlFor="audit-asset-tag" className="text-xs font-medium text-muted-foreground">Asset Tag</Label>
+                  <Input
+                    id="audit-asset-tag"
+                    value={manualTag}
+                    onChange={(e) => setManualTag(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        void handleManualTagSubmit();
+                      }
+                    }}
+                    placeholder="AW-LAP-0001"
+                    className="h-9 w-40 border-0 bg-transparent px-1 shadow-none focus-visible:ring-0"
+                  />
+                  <Button size="sm" variant="secondary" onClick={() => void handleManualTagSubmit()} disabled={!manualTag.trim()}>
+                    Verify
+                  </Button>
+                </div>
+              </>
             )}
             <Dialog open={createOpen} onOpenChange={setCreateOpen}>
               <DialogTrigger asChild>
@@ -167,20 +218,30 @@ export default function Audits() {
                   </div>
                   <div className="grid gap-2">
                     <Label>Department</Label>
-                    <Select value={form.departmentId} onValueChange={(v) => setForm({ ...form, departmentId: v })}>
-                      <SelectTrigger><SelectValue placeholder="Choose department (or enter free-text)" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">(No department)</SelectItem>
-                        {departments.map((d, i) => (
-                          <SelectItem key={(d.id ?? d.name) + String(i)} value={String(d.id ?? `name:${d.name}`)}>{d.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Input
-                      value={form.departmentFree}
-                      onChange={(e) => setForm({ ...form, departmentFree: e.target.value })}
-                      placeholder="Or enter a department name"
-                    />
+                    {hasDepartments ? (
+                      <>
+                        <Select value={form.departmentId} onValueChange={(v) => setForm({ ...form, departmentId: v, departmentFree: '' })}>
+                          <SelectTrigger><SelectValue placeholder="Choose department" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">(No department)</SelectItem>
+                            {departments.map((d, i) => (
+                              <SelectItem key={(d.id ?? d.name) + String(i)} value={String(d.id ?? `name:${d.name}`)}>{d.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Input
+                          value={form.departmentFree}
+                          onChange={(e) => setForm({ ...form, departmentFree: e.target.value })}
+                          placeholder="Or enter a department name"
+                        />
+                      </>
+                    ) : (
+                      <Input
+                        value={form.departmentFree}
+                        onChange={(e) => setForm({ ...form, departmentFree: e.target.value, departmentId: 'none' })}
+                        placeholder="Enter a department name"
+                      />
+                    )}
                   </div>
                   <div className="grid gap-2">
                     <Label>Location</Label>
@@ -263,7 +324,13 @@ export default function Audits() {
               )}
               {activeSession.status === 'in_progress' && (
                 <>
-                  <Button size="sm" variant="secondary" onClick={() => completeSession.mutate(activeSession.id)} disabled={completeSession.isPending}>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => completeSession.mutate(activeSession.id)}
+                    disabled={completeSession.isPending}
+                    className="glow-primary animate-pulse border-emerald-400/60 bg-emerald-500 text-white shadow-[0_0_16px_rgba(16,185,129,0.7)] hover:bg-emerald-600 hover:shadow-[0_0_20px_rgba(16,185,129,0.9)]"
+                  >
                     Complete Audit
                   </Button>
                   <Button size="sm" variant="outline" className="gap-1" onClick={() => handleExport('xlsx')}>
@@ -410,15 +477,16 @@ export default function Audits() {
         onOpenChange={setScannerOpen}
         onVerify={async (payload) => {
           if (!activeSessionId) return;
+          const assetTag = extractAssetTag(payload.asset_tag || '');
           try {
             await scanAsset.mutateAsync({
               sessionId: activeSessionId,
-              asset_tag: payload.asset_tag,
+              asset_tag: assetTag,
               verification: payload.verification,
               current_condition: payload.current_condition,
               notes: payload.notes,
             });
-            toast.success(`Verified: ${payload.asset_tag}`);
+            toast.success(`Verified: ${assetTag}`);
             void refetchResults();
           } catch (err) {
             toast.warning(err instanceof Error ? err.message : 'Scan failed');

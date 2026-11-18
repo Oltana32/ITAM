@@ -5,6 +5,12 @@ import { authFetch } from '@/lib/auth';
 
 const API_BASE = '/api/assets/';
 
+function toSafeCurrencyNumber(value: unknown): number {
+  if (value === null || value === undefined || value === '') return 0;
+  const parsed = typeof value === 'string' ? Number(value.trim()) : Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 function parseApiError(payload: unknown, fallback: string): string {
   if (!payload || typeof payload !== 'object') return fallback;
   const data = payload as Record<string, unknown>;
@@ -93,13 +99,16 @@ export function useAssets() {
       department: raw.department || undefined,
       location: raw.location_name || raw.location || 'Unassigned',
       purchaseDate: raw.purchase_date || '',
-      purchaseCost: raw.purchase_cost ?? undefined,
+      purchaseCost: raw.purchase_cost == null || raw.purchase_cost === '' ? undefined : toSafeCurrencyNumber(raw.purchase_cost),
       warrantyExpiry: raw.warranty_expiry || undefined,
       manufacturer: raw.manufacturer_name || String(raw.manufacturer || ''),
       model: raw.model || '',
       serialNumber: raw.serial_number || '',
+      specs: raw.specs ?? raw.dynamic_specs ?? {},
       notes: raw.notes || undefined,
-      currentValue: raw.depreciation?.current_value ?? raw.purchase_cost ?? undefined,
+      currentValue: raw.depreciation?.current_value == null || raw.depreciation?.current_value === ''
+        ? raw.purchase_cost == null || raw.purchase_cost === '' ? undefined : toSafeCurrencyNumber(raw.purchase_cost)
+        : toSafeCurrencyNumber(raw.depreciation?.current_value),
       lastAuditDate: raw.last_audit_at || undefined,
       // Normalize assigned_to which may be a string or a nested user object ({id,email})
       assignedTo: (() => {

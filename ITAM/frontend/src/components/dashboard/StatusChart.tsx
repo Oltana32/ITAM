@@ -7,10 +7,21 @@ interface StatusChartProps {
 }
 
 const STATUS_COLORS: Record<AssetStatus, string> = {
-  'in-use': 'hsl(142, 76%, 36%)',
+  procured: 'hsl(210, 30%, 55%)',
+  received: 'hsl(200, 60%, 45%)',
+  in_stock: 'hsl(220, 80%, 60%)',
   available: 'hsl(217, 91%, 50%)',
+  ready: 'hsl(165, 70%, 45%)',
+  assigned: 'hsl(142, 76%, 36%)',
+  'in-use': 'hsl(142, 76%, 28%)',
   maintenance: 'hsl(38, 92%, 50%)',
+  overdue: 'hsl(24, 85%, 55%)',
+  returned: 'hsl(182, 78%, 45%)',
+  found: 'hsl(255, 70%, 65%)',
   retired: 'hsl(215, 16%, 47%)',
+  disposed: 'hsl(0, 72%, 46%)',
+  lost: 'hsl(0, 65%, 55%)',
+  damaged: 'hsl(30, 90%, 48%)',
 };
 
 export function StatusChart({ data }: StatusChartProps) {

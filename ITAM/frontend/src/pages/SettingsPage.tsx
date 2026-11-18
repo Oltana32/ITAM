@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getStoredUser } from '@/lib/auth';
+import { authFetch, getStoredUser } from '@/lib/auth';
 import { Settings, Bell, Shield, Database, Globe, HardDrive, Download, Upload, Trash2 } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -28,9 +28,9 @@ export default function SettingsPage() {
   const [compactMode, setCompactMode] = useState(false);
   const [animationsEnabled, setAnimationsEnabled] = useState(true);
   const [showThumbnails, setShowThumbnails] = useState(true);
+  const [isResettingData, setIsResettingData] = useState(false);
 
   // notifications
-  const [emailNotifications, setEmailNotifications] = useState(true);
   const [warrantyAlerts, setWarrantyAlerts] = useState(true);
   const [alertDays, setAlertDays] = useState('30');
   const [licenseAlerts, setLicenseAlerts] = useState(true);
@@ -39,10 +39,8 @@ export default function SettingsPage() {
   const [lowStockWarnings, setLowStockWarnings] = useState(false);
 
   // security
-  const [twoFactor, setTwoFactor] = useState(false);
   const [autoTimeout, setAutoTimeout] = useState(true);
   const [sessionTimeout, setSessionTimeout] = useState('30');
-  const [requireApproval, setRequireApproval] = useState(true);
   const [logUserActions, setLogUserActions] = useState(true);
 
   // load saved settings from localStorage
@@ -60,7 +58,6 @@ export default function SettingsPage() {
         if (typeof s.animationsEnabled === 'boolean') setAnimationsEnabled(s.animationsEnabled);
         if (typeof s.showThumbnails === 'boolean') setShowThumbnails(s.showThumbnails);
 
-        if (typeof s.emailNotifications === 'boolean') setEmailNotifications(s.emailNotifications);
         if (typeof s.warrantyAlerts === 'boolean') setWarrantyAlerts(s.warrantyAlerts);
         if (s.alertDays) setAlertDays(String(s.alertDays));
         if (typeof s.licenseAlerts === 'boolean') setLicenseAlerts(s.licenseAlerts);
@@ -68,10 +65,8 @@ export default function SettingsPage() {
         if (typeof s.auditOverdueAlerts === 'boolean') setAuditOverdueAlerts(s.auditOverdueAlerts);
         if (typeof s.lowStockWarnings === 'boolean') setLowStockWarnings(s.lowStockWarnings);
 
-        if (typeof s.twoFactor === 'boolean') setTwoFactor(s.twoFactor);
         if (typeof s.autoTimeout === 'boolean') setAutoTimeout(s.autoTimeout);
         if (s.sessionTimeout) setSessionTimeout(String(s.sessionTimeout));
-        if (typeof s.requireApproval === 'boolean') setRequireApproval(s.requireApproval);
         if (typeof s.logUserActions === 'boolean') setLogUserActions(s.logUserActions);
       }
     } catch (e) {
@@ -88,21 +83,40 @@ export default function SettingsPage() {
       compactMode,
       animationsEnabled,
       showThumbnails,
-      emailNotifications,
       warrantyAlerts,
       alertDays,
       licenseAlerts,
       maintenanceReminders,
       auditOverdueAlerts,
       lowStockWarnings,
-      twoFactor,
       autoTimeout,
       sessionTimeout,
-      requireApproval,
       logUserActions,
     };
     localStorage.setItem('itam_settings', JSON.stringify(s));
     toast.success('Settings saved');
+  };
+
+  const handleResetAllData = async () => {
+    if (!window.confirm('This will permanently delete all asset data. This action cannot be undone. Continue?')) {
+      return;
+    }
+
+    try {
+      setIsResettingData(true);
+      const response = await authFetch('/api/assets/delete-all/', { method: 'DELETE' });
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(typeof payload.detail === 'string' ? payload.detail : 'Failed to delete assets');
+      }
+
+      toast.success(`Deleted ${payload.deleted ?? 0} assets`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to delete assets');
+    } finally {
+      setIsResettingData(false);
+    }
   };
 
   return (
@@ -188,8 +202,6 @@ export default function SettingsPage() {
                 <CardDescription>Configure when and how you receive alerts</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="flex items-center justify-between"><Label>Email notifications</Label><Switch checked={emailNotifications} onCheckedChange={(v) => setEmailNotifications(Boolean(v))} /></div>
-                <Separator />
                 <div className="flex items-center justify-between"><Label>Warranty expiry alerts</Label><Switch checked={warrantyAlerts} onCheckedChange={(v) => setWarrantyAlerts(Boolean(v))} /></div>
                 <div className="space-y-2">
                   <Label className="text-xs text-muted-foreground">Alert before expiry (days)</Label>
@@ -216,7 +228,6 @@ export default function SettingsPage() {
                 <CardDescription>Authentication & session settings</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="flex items-center justify-between"><Label>Two-factor authentication</Label><Switch checked={twoFactor} onCheckedChange={(v) => setTwoFactor(Boolean(v))} /></div>
                 <div className="flex items-center justify-between"><Label>Auto session timeout</Label><Switch checked={autoTimeout} onCheckedChange={(v) => setAutoTimeout(Boolean(v))} /></div>
                 <div className="space-y-2">
                   <Label className="text-xs text-muted-foreground">Session timeout</Label>
@@ -228,7 +239,6 @@ export default function SettingsPage() {
                   </Select>
                 </div>
                 <Separator />
-                <div className="flex items-center justify-between"><Label>Require approval for asset transfers</Label><Switch checked={requireApproval} onCheckedChange={(v) => setRequireApproval(Boolean(v))} /></div>
                 <div className="flex items-center justify-between"><Label>Log all user actions</Label><Switch checked={logUserActions} onCheckedChange={(v) => setLogUserActions(Boolean(v))} /></div>
               </CardContent>
             </Card>
@@ -237,23 +247,16 @@ export default function SettingsPage() {
           <TabsContent value="data" className="space-y-4 mt-6">
             <Card className="animate-fade-in-up">
               <CardHeader>
-                <div className="flex items-center gap-2"><Database className="h-4 w-4 text-muted-foreground" /><CardTitle className="text-base">Storage & Backup</CardTitle></div>
+                <div className="flex items-center gap-2"><Database className="h-4 w-4 text-muted-foreground" /><CardTitle className="text-base">Data Management</CardTitle></div>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Storage Used</span><span className="font-semibold">2.4 GB / 10 GB</span></div>
-                  <Progress value={24} className="h-2" />
-                </div>
-                <Separator />
-                <div className="flex gap-3">
-                  <Button variant="outline" className="gap-2" onClick={() => toast.success('Backup started...')}><Download className="h-4 w-4" />Export Backup</Button>
-                  <Button variant="outline" className="gap-2" onClick={() => toast.info('Import dialog would open')}><Upload className="h-4 w-4" />Import Data</Button>
-                </div>
-                <Separator />
                 <div className="p-3 rounded-lg border border-destructive/20 bg-destructive/5">
                   <p className="text-sm font-medium text-destructive">Danger Zone</p>
                   <p className="text-xs text-muted-foreground mt-1">Permanently delete all asset data. This action cannot be undone.</p>
-                  <Button variant="destructive" size="sm" className="mt-3 gap-2" onClick={() => toast.error('This action requires admin confirmation')}><Trash2 className="h-3.5 w-3.5" />Reset All Data</Button>
+                  <Button variant="destructive" size="sm" className="mt-3 gap-2" onClick={handleResetAllData} disabled={isResettingData}>
+                    <Trash2 className="h-3.5 w-3.5" />
+                    {isResettingData ? 'Deleting...' : 'Reset All Data'}
+                  </Button>
                 </div>
               </CardContent>
             </Card>

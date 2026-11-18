@@ -96,7 +96,8 @@ export function AppHeader({ onOpenSearch, onToggleSidebar }: AppHeaderProps) {
               size="sm"
               onClick={() => {
                 clearAuthSession();
-                window.location.href = "/login";
+                const loginPath = `${import.meta.env.BASE_URL ?? "/ITAM/"}login`;
+                window.location.assign(loginPath);
               }}
             >
               Logout

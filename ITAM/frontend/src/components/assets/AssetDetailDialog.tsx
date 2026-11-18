@@ -79,6 +79,7 @@ export function AssetDetailDialog({
   const warrantyDaysRemaining = asset.warrantyExpiry 
     ? Math.ceil((new Date(asset.warrantyExpiry).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
     : null;
+  const specEntries = Object.entries(asset.specs ?? {}).filter(([, value]) => value !== undefined && value !== null && value !== '');
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -161,6 +162,23 @@ export function AssetDetailDialog({
             } 
           />
             </div>
+
+        {specEntries.length > 0 && (
+          <>
+            <Separator className="my-4" />
+            <div className="space-y-3">
+              <p className="text-sm font-medium">Specifications</p>
+              <div className="grid grid-cols-2 gap-x-8 gap-y-4">
+                {specEntries.map(([key, value]) => (
+                  <div key={key} className="min-w-0">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">{key.replace(/_/g, ' ')}</p>
+                    <p className="mt-1 text-sm font-medium break-words">{String(value)}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
 
         {asset.notes && (
           <>

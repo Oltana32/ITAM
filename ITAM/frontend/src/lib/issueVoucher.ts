@@ -20,7 +20,6 @@ export interface ReturnVoucherInspection {
   finalAssetStatus: string;
   inspectionRemarks: string;
   employeeSignature: string;
-  itStaffSignature: string;
   returnedBy: string;
   receivedBy: string;
 }
@@ -31,6 +30,8 @@ export interface IssueVoucherAsset {
   brand: string;
   model: string;
   serialNumber: string;
+  givenDate?: string;
+  price?: number;
   condition: string;
   status: string;
   qrValue: string;
@@ -78,6 +79,8 @@ interface AssetLike {
   serialNumber?: string;
   condition?: string;
   category?: string;
+  purchaseCost?: number | string;
+  currentValue?: number | string;
   specs?: Record<string, string | number>;
 }
 
@@ -97,11 +100,10 @@ interface VoucherPage {
   assetRows: IssueVoucherAsset[];
 }
 
-const AGREEMENT_TEXT = 'By signing this form, I acknowledge that I have received the equipment listed above in good working condition. I understand that all assigned equipment remains the property of Awash Wine S.C. and is provided solely for authorized business purposes. I agree to exercise reasonable care in the use and safekeeping of the assigned equipment and to promptly report any loss, theft, damage, or malfunction to the IT Department. I further agree to return all assigned equipment in good condition upon transfer, resignation, termination of employment, or whenever requested by the Company. I also agree to comply with all applicable Company ICT policies and procedures. I understand that I may be held responsible for any loss, damage, misuse, or unauthorized use of the assigned equipment resulting from negligence or failure to comply with Company policies.';
-// Use the provided Equipment Return Agreement for return declarations
-const RETURN_AGREEMENT_TEXT = `By signing this form, I acknowledge that the equipment listed above has been returned to the IT Department of Awash Wine S.C. I understand that the returned equipment has been received for inspection and verification of its condition, functionality, and completeness.
+const AGREEMENT_TEXT = 'By signing this voucher, I acknowledge that I have received the equipment listed above in good working condition. I understand that all assigned equipment remains the property of Awash Wine S.C. and is provided solely for authorized business purposes. I agree to exercise reasonable care in the use and safekeeping of the assigned equipment and to promptly report any loss, theft, damage, or malfunction to the IT Department. I further agree to return all assigned equipment in good condition upon transfer, resignation, termination of employment, or whenever requested by the Company. I also agree to comply with all applicable Company ICT policies and procedures. I understand that I may be held responsible for any loss, damage, misuse, or unauthorized use of the assigned equipment resulting from negligence or failure to comply with Company policies.';
+const RETURN_AGREEMENT_TEXT = `I acknowledge that I have returned the equipment listed above to the IT Department of Awash Wine S.C. I understand that the returned equipment has been received for inspection and verification of its condition, functionality, and completeness.
 
-I acknowledge that any missing items, damage beyond normal wear and tear, misuse, or unauthorized modifications identified during the inspection will be documented, and I may be held responsible in accordance with Company ICT and Fnance policies and procedures.`;
+I acknowledge that any missing items, damage beyond normal wear and tear, misuse, or unauthorized modifications identified during the inspection will be documented, and I may be held responsible in accordance with Company ICT and Finance policies and procedures.`;
 
 const MAX_ROWS_PER_PAGE = 6;
 
@@ -121,7 +123,7 @@ interface VoucherTemplateConfig {
 }
 
 const ISSUE_VOUCHER_CONFIG: VoucherTemplateConfig = {
-  title: 'IT Equipment Assignment Agreement',
+  title: 'ICT EQUIPMENT ISSUE VOUCHER',
   subtitle: '',
   metaDateLabel: 'Issue Date',
   metaByLabel: 'Printed By',
@@ -136,7 +138,7 @@ const ISSUE_VOUCHER_CONFIG: VoucherTemplateConfig = {
 };
 
 const RETURN_VOUCHER_CONFIG: VoucherTemplateConfig = {
-  title: 'IT EQUIPMENT RETURN Form',
+  title: 'IT EQUIPMENT RETURN VOUCHER',
   subtitle: '',
   metaDateLabel: 'Return Date',
   metaByLabel: 'Processed By',
@@ -182,8 +184,17 @@ function formatInspectionValue(value: unknown): string {
   return String(value);
 }
 
+function formatCurrency(value?: number): string {
+  if (value === undefined || value === null || Number.isNaN(value)) return '—';
+  return new Intl.NumberFormat('en-ET', {
+    style: 'currency',
+    currency: 'ETB',
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
 function buildInspectionDetailsSection(inspection: ReturnVoucherInspection): string {
-  const items = [
+  const items: [string, unknown][] = [
     ['Inspection Date', inspection.inspectionDate],
     ['Inspected By', inspection.inspectedBy],
     ['Overall Condition', inspection.overallCondition],
@@ -222,9 +233,52 @@ function buildAssetRows(assets: IssueVoucherAsset[]): string {
       <td class="cell">${formatField(asset.brand)}</td>
       <td class="cell">${formatField(asset.model)}</td>
       <td class="cell">${formatField(asset.serialNumber)}</td>
+      <td class="cell">${formatCurrency(asset.price)}</td>
+      <td class="cell">${formatDate(asset.givenDate || '')}</td>
       <td class="cell">${formatField(asset.condition)}</td>
       <td class="cell">${formatField(asset.status)}</td>
     </tr>`).join('');
+}
+
+function formatSpecLabel(key: string): string {
+  return key
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase())
+    .trim();
+}
+
+function buildDeviceSpecsSection(assets: IssueVoucherAsset[]): string {
+  const specAssets = assets.filter((asset) => asset.specs && Object.keys(asset.specs).length > 0);
+
+  if (specAssets.length === 0) {
+    return '';
+  }
+
+  return specAssets.map((asset) => {
+    const rows = Object.entries(asset.specs ?? {})
+      .map(([key, value]) => `
+        <tr>
+          <td class="cell">${formatSpecLabel(key)}</td>
+          <td class="cell">${formatField(String(value))}</td>
+        </tr>`)
+      .join('');
+
+    return `
+      <div class="section">
+        <div class="section-title">Device Specifications - ${formatField(asset.assetTag)}</div>
+        <table>
+          <thead>
+            <tr>
+              <th>Specification</th>
+              <th>Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows}
+          </tbody>
+        </table>
+      </div>`;
+  }).join('');
 }
 
 function buildQrBlocks(assets: IssueVoucherAsset[]): string {
@@ -363,6 +417,8 @@ function buildVoucherPages(data: IssueVoucherData, logoUrl: string, config: Vouc
               <th>Brand</th>
               <th>Model</th>
               <th>Serial Number</th>
+              <th>Price</th>
+              <th>Given Date</th>
               <th>Condition</th>
               <th>${escapeHtml(config.statusColumnLabel)}</th>
             </tr>
@@ -372,6 +428,8 @@ function buildVoucherPages(data: IssueVoucherData, logoUrl: string, config: Vouc
           </tbody>
         </table>
       </div>
+
+      ${buildDeviceSpecsSection(assets)}
 
       <div class="section">
         <div class="section-title">${config.agreementTitle}</div>
@@ -446,6 +504,7 @@ export function buildIssueVoucherDataFromAssignments(input: BuildIssueVoucherDat
       const condition = conditionValue
         ? String(conditionValue).charAt(0).toUpperCase() + String(conditionValue).slice(1)
         : 'Good';
+      const numericPrice = asset ? Number(asset.currentValue ?? asset.purchaseCost ?? 0) : 0;
 
       return {
         assetTag,
@@ -453,6 +512,8 @@ export function buildIssueVoucherDataFromAssignments(input: BuildIssueVoucherDat
         brand,
         model,
         serialNumber,
+        givenDate: assignment.assigned_date || undefined,
+        price: Number.isFinite(numericPrice) ? numericPrice : 0,
         condition,
         status: 'Assigned',
         qrValue: `https://itam.company.local/assets/${assetTag === '—' ? 'unknown' : assetTag}`,
@@ -476,10 +537,25 @@ export function buildIssueVoucherDataFromAssignments(input: BuildIssueVoucherDat
   };
 }
 
-export function buildIssueVoucherPages(data: IssueVoucherData, logoUrl: string = '/awash%20wine%20logo.png'): VoucherPage[] {
-  return buildVoucherPages(data, logoUrl, ISSUE_VOUCHER_CONFIG);
+function resolvePrintLogoUrl(logoUrl?: string): string {
+  const defaultPath = 'awash%20wine%20logo.png';
+
+  if (logoUrl) {
+    return logoUrl;
+  }
+
+  if (typeof window !== 'undefined') {
+    const baseUrl = import.meta.env.BASE_URL || '/';
+    return `${window.location.origin}${baseUrl}${defaultPath}`;
+  }
+
+  return `/${defaultPath}`;
 }
 
-export function buildReturnVoucherPages(data: IssueVoucherData, logoUrl: string = '/awash%20wine%20logo.png'): VoucherPage[] {
-  return buildVoucherPages(data, logoUrl, RETURN_VOUCHER_CONFIG);
+export function buildIssueVoucherPages(data: IssueVoucherData, logoUrl?: string): VoucherPage[] {
+  return buildVoucherPages(data, resolvePrintLogoUrl(logoUrl), ISSUE_VOUCHER_CONFIG);
+}
+
+export function buildReturnVoucherPages(data: IssueVoucherData, logoUrl?: string): VoucherPage[] {
+  return buildVoucherPages(data, resolvePrintLogoUrl(logoUrl), RETURN_VOUCHER_CONFIG);
 }

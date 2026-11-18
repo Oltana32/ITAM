@@ -10,6 +10,8 @@ import { toast } from "sonner";
 
 const REMEMBER_EMAIL_KEY = "awash-remember-email";
 
+const appBaseUrl = import.meta.env.BASE_URL || "/";
+
 export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -118,7 +120,7 @@ export default function Login() {
   return (
     <div className="relative min-h-screen w-screen overflow-hidden bg-[#F4EBD0]">
       <img
-        src="/awash-login-bg.png"
+        src={`${appBaseUrl}awash-login-bg.png`}
         alt="Awash login background"
         aria-hidden="true"
         loading="lazy"
@@ -139,7 +141,7 @@ export default function Login() {
           {/* Brand header */}
           <div className="mb-5 flex flex-col items-center text-center">
             <img
-              src="/awash-logo.png"
+              src={`${appBaseUrl}awash-logo.png`}
               alt="Awash Wine — Since 1936"
               className="mb-3 h-auto w-44 object-contain"
             />

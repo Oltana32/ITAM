@@ -20,6 +20,7 @@ describe('buildIssueVoucherPages', () => {
         brand: 'Dell',
         model: 'Latitude 5440',
         serialNumber: `SN-${index + 1}`,
+        price: 32000 + index * 500,
         condition: 'Good',
         status: 'Assigned',
         qrValue: `https://itam.company.local/assets/AW-LAP-00${index + 1}`,
@@ -35,7 +36,71 @@ describe('buildIssueVoucherPages', () => {
     expect(pages[0].html).toContain('AW-LAP-001');
     expect(pages[0].html).toContain('Employee Information & QR Codes');
     expect(pages[0].html).toContain('Asset Category');
+    expect(pages[0].html).toContain('Price');
+    expect(pages[0].html).toContain('ETB');
     expect(pages[0].html).not.toContain('<strong>Issue Date</strong>');
+  });
+
+  it('uses the app base path for the default voucher logo', () => {
+    const pages = buildIssueVoucherPages({
+      voucherNumber: 'AW-2026-0005',
+      issueDate: '2026-07-28',
+      printedBy: 'IT Asset Management System',
+      employee: {
+        name: 'Abebe Bekele',
+        employeeId: 'EMP-101',
+        department: 'IT',
+        position: 'System Administrator',
+        location: 'Head Office',
+      },
+      assets: [{
+        assetTag: 'AW-NET-002',
+        assetName: 'Switch',
+        brand: 'Cisco',
+        model: 'Catalyst 9200',
+        serialNumber: 'SN-NET-002',
+        condition: 'Good',
+        status: 'Assigned',
+        qrValue: 'https://itam.company.local/assets/AW-NET-002',
+      }],
+    });
+
+    expect(pages[0].html).toContain(encodeURI(`${import.meta.env.BASE_URL || '/'}awash wine logo.png`));
+  });
+
+  it('includes a device specification table for assets with specs', () => {
+    const pages = buildIssueVoucherPages({
+      voucherNumber: 'AW-2026-0004',
+      issueDate: '2026-07-28',
+      printedBy: 'IT Asset Management System',
+      employee: {
+        name: 'Abebe Bekele',
+        employeeId: 'EMP-101',
+        department: 'IT',
+        position: 'System Administrator',
+        location: 'Head Office',
+      },
+      assets: [{
+        assetTag: 'AW-NET-001',
+        assetName: 'Switch',
+        brand: 'Cisco',
+        model: 'Catalyst 9200',
+        serialNumber: 'SN-NET-001',
+        condition: 'Good',
+        status: 'Assigned',
+        qrValue: 'https://itam.company.local/assets/AW-NET-001',
+        specs: { interface_count: 48, port_speed: '1G', management: 'Web UI' },
+      }],
+    });
+
+    expect(pages[0].html).toContain('Device Specifications');
+    expect(pages[0].html).toContain('Interface Count');
+    expect(pages[0].html).toContain('48');
+
+    const agreementIndex = pages[0].html.indexOf('Employee Equipment Agreement');
+    const deviceSpecsIndex = pages[0].html.indexOf('Device Specifications');
+    expect(deviceSpecsIndex).toBeGreaterThan(-1);
+    expect(deviceSpecsIndex).toBeLessThan(agreementIndex);
   });
 
   it('builds a return voucher with the return-specific agreement and headings', () => {

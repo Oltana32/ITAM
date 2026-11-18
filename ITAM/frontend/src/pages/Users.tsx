@@ -37,6 +37,12 @@ interface UserRow {
   is_active?: boolean;
 }
 
+const buildUserEmail = (firstName: string, lastName: string) => {
+  const name = (firstName || lastName || '').trim();
+  if (!name) return '';
+  return `${name.toLowerCase().replace(/\s+/g, '')}@awashwine.com`;
+};
+
 export default function Users() {
   const [searchQuery, setSearchQuery] = useState('');
   const [users, setUsers] = useState<UserRow[]>([]);
@@ -61,14 +67,15 @@ export default function Users() {
   );
 
   const handleAdd = async () => {
-    if (!form.first_name.trim() || !form.email.trim() || form.password.length < 8) {
-      toast.error('First name, email, and password (8+ chars) are required');
+    const nextEmail = form.email.trim() || buildUserEmail(form.first_name, form.last_name);
+    if (!form.first_name.trim() || !nextEmail || form.password.length < 8) {
+      toast.error('First name, valid email, and password (8+ chars) are required');
       return;
     }
     const response = await authFetch('/api/users/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
+      body: JSON.stringify({ ...form, email: nextEmail }),
     });
     if (!response.ok) {
       toast.error('Failed to create user');
@@ -126,15 +133,51 @@ export default function Users() {
               <div className="grid gap-4 py-2">
                 <div className="grid gap-2">
                   <Label htmlFor="u-first">First name</Label>
-                  <Input id="u-first" value={form.first_name} onChange={(e) => setForm({ ...form, first_name: e.target.value })} placeholder="Abebe" />
+                  <Input
+                    id="u-first"
+                    value={form.first_name}
+                    onChange={(e) => {
+                      const nextFirstName = e.target.value;
+                      setForm((prev) => {
+                        const nextEmail = prev.email.trim() || buildUserEmail(nextFirstName, prev.last_name);
+                        return {
+                          ...prev,
+                          first_name: nextFirstName,
+                          email: prev.email.trim() ? prev.email : nextEmail,
+                        };
+                      });
+                    }}
+                    placeholder="Abebe"
+                  />
                 </div>
                 <div className="grid gap-2">
                   <Label htmlFor="u-last">Last name</Label>
-                  <Input id="u-last" value={form.last_name} onChange={(e) => setForm({ ...form, last_name: e.target.value })} placeholder="Bekele" />
+                  <Input
+                    id="u-last"
+                    value={form.last_name}
+                    onChange={(e) => {
+                      const nextLastName = e.target.value;
+                      setForm((prev) => {
+                        const nextEmail = prev.email.trim() || buildUserEmail(prev.first_name, nextLastName);
+                        return {
+                          ...prev,
+                          last_name: nextLastName,
+                          email: prev.email.trim() ? prev.email : nextEmail,
+                        };
+                      });
+                    }}
+                    placeholder="Bekele"
+                  />
                 </div>
                 <div className="grid gap-2">
                   <Label htmlFor="u-email">Email</Label>
-                  <Input id="u-email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="user@awashwine.com" />
+                  <Input
+                    id="u-email"
+                    type="email"
+                    value={form.email}
+                    onChange={(e) => setForm({ ...form, email: e.target.value })}
+                    placeholder="user@awashwine.com"
+                  />
                 </div>
                 <div className="grid gap-2">
                   <Label htmlFor="u-pass">Password</Label>

@@ -2,159 +2,97 @@
 
 from django.db import models
 
-class AssetStatus(models.TextChoices):
-    """Unified asset status - single source of truth for entire system."""
-    
-    # Procurement states - asset lifecycle from procurement through receipt
-    PROCURED = "procured", "Procured (ordered, not yet received)"
-    RECEIVED = "received", "Received (in warehouse, not yet processed)"
-    IN_STOCK = "in_stock", "In Stock (ready for assignment)"
-    
-    # Available states (can be assigned)
-    READY = "ready", "Ready (not yet assigned)"
+
+class _AssetStatusMeta(type(models.TextChoices)):
+    """Expose legacy aliases without including them in AssetStatus.choices."""
+
+    _LEGACY_ALIASES = {
+        "FOUND": "found",
+        "PROCURED": "procured",
+        "RECEIVED": "received",
+        "IN_STOCK": "in_stock",
+        "READY": "ready",
+        "IN_USE": "in_use",
+        "OVERDUE": "overdue",
+        "RETURNED": "returned",
+        "DAMAGED": "damaged",
+    }
+
+    def __getattr__(cls, name):
+        if name in cls._LEGACY_ALIASES:
+            return cls._LEGACY_ALIASES[name]
+        return super().__getattr__(name)
+
+
+class AssetStatus(models.TextChoices, metaclass=_AssetStatusMeta):
+    """Canonical asset lifecycle states shown in the application."""
+
     AVAILABLE = "available", "Available (not assigned)"
-    
-    # Active use states
     ASSIGNED = "assigned", "Assigned to user"
-    IN_USE = "in_use", "In use by assignee"
-    
-    # Temporary states
     MAINTENANCE = "maintenance", "Under maintenance"
-    OVERDUE = "overdue", "Return overdue"
-    
-    # Return/recovery states
-    RETURNED = "returned", "Returned (processing)"
-    FOUND = "found", "Found (was lost, now recovered)"
-    
-    # Final states (terminal)
-    RETIRED = "retired", "Retired from service"
     DISPOSED = "disposed", "Disposed"
+    RETIRED = "retired", "Retired from service"
     LOST = "lost", "Lost/Missing"
-    DAMAGED = "damaged", "Damaged (non-repairable)"
-    
 
 
-# Define allowed state transitions
 VALID_STATUS_TRANSITIONS = {
-    # From -> [allowed to states]
-    # Procurement workflow
-    AssetStatus.PROCURED: [
-        AssetStatus.RECEIVED,
-        AssetStatus.RETIRED,  # Can retire if order is cancelled
-    ],
-    AssetStatus.RECEIVED: [
-        AssetStatus.IN_STOCK,
-        AssetStatus.DAMAGED,  # Can be damaged on receipt
-        AssetStatus.RETIRED,
-    ],
-    AssetStatus.IN_STOCK: [
-        AssetStatus.AVAILABLE,
-        AssetStatus.READY,
-        AssetStatus.MAINTENANCE,
-        AssetStatus.RETIRED,
-    ],
-    
-    # Ready/Available states
-    AssetStatus.READY: [
-        AssetStatus.AVAILABLE,
-        AssetStatus.ASSIGNED,
-        AssetStatus.MAINTENANCE,
-        AssetStatus.RETIRED,
-    ],
     AssetStatus.AVAILABLE: [
         AssetStatus.ASSIGNED,
         AssetStatus.MAINTENANCE,
         AssetStatus.RETIRED,
+        AssetStatus.DISPOSED,
+        AssetStatus.LOST,
     ],
-    
-    # Active use
     AssetStatus.ASSIGNED: [
-        AssetStatus.IN_USE,
-        AssetStatus.RETURNED,
-        AssetStatus.MAINTENANCE,
-        AssetStatus.OVERDUE,
-        AssetStatus.LOST,
-        AssetStatus.DAMAGED,
-    ],
-    AssetStatus.IN_USE: [
-        AssetStatus.RETURNED,
-        AssetStatus.MAINTENANCE,
-        AssetStatus.OVERDUE,
-        AssetStatus.LOST,
-        AssetStatus.DAMAGED,
-    ],
-    
-    # Maintenance workflow
-    AssetStatus.MAINTENANCE: [
         AssetStatus.AVAILABLE,
-        AssetStatus.ASSIGNED,
-        AssetStatus.IN_STOCK,
-        AssetStatus.DAMAGED,
-        AssetStatus.RETIRED,
-    ],
-    
-    # Return/Recovery
-    AssetStatus.RETURNED: [
-        AssetStatus.AVAILABLE,
-        AssetStatus.ASSIGNED,
-        AssetStatus.MAINTENANCE,
-        AssetStatus.RETIRED,
-        AssetStatus.DAMAGED,
-        AssetStatus.IN_STOCK,
-    ],
-    AssetStatus.OVERDUE: [
         AssetStatus.RETURNED,
-        AssetStatus.LOST,
-        AssetStatus.DAMAGED,
-    ],
-    AssetStatus.LOST: [
-        AssetStatus.FOUND,  # Can be recovered
-        AssetStatus.RETIRED,
-    ],
-    AssetStatus.FOUND: [
-        AssetStatus.AVAILABLE,  # If recovered, back to available
-        AssetStatus.ASSIGNED,
-        AssetStatus.DAMAGED,    # Or might be damaged when found
-        AssetStatus.MAINTENANCE,
-        AssetStatus.IN_STOCK,
-    ],
-    
-    # Damage/Disposal
-    AssetStatus.DAMAGED: [
         AssetStatus.MAINTENANCE,
         AssetStatus.RETIRED,
         AssetStatus.DISPOSED,
+        AssetStatus.LOST,
     ],
-    
-    # Terminal states
+    AssetStatus.MAINTENANCE: [
+        AssetStatus.AVAILABLE,
+        AssetStatus.ASSIGNED,
+        AssetStatus.RETIRED,
+        AssetStatus.DISPOSED,
+        AssetStatus.LOST,
+    ],
     AssetStatus.RETIRED: [
-        # Terminal state - no transitions allowed
+        AssetStatus.AVAILABLE,
+        AssetStatus.DISPOSED,
     ],
-    AssetStatus.DISPOSED: [
-        # Terminal state - no transitions allowed
+    AssetStatus.LOST: [
+        AssetStatus.AVAILABLE,
     ],
+    AssetStatus.DISPOSED: [],
+
+    # Legacy compatibility entries for older records.
+    AssetStatus.PROCURED: [AssetStatus.RECEIVED, AssetStatus.AVAILABLE, AssetStatus.DISPOSED],
+    AssetStatus.RECEIVED: [AssetStatus.IN_STOCK, AssetStatus.AVAILABLE, AssetStatus.RETIRED, AssetStatus.DISPOSED],
+    AssetStatus.IN_STOCK: [AssetStatus.AVAILABLE, AssetStatus.MAINTENANCE, AssetStatus.RETIRED, AssetStatus.DISPOSED, AssetStatus.LOST],
+    AssetStatus.READY: [AssetStatus.AVAILABLE, AssetStatus.ASSIGNED, AssetStatus.MAINTENANCE, AssetStatus.RETIRED, AssetStatus.DISPOSED, AssetStatus.LOST],
+    AssetStatus.IN_USE: [AssetStatus.AVAILABLE, AssetStatus.RETURNED, AssetStatus.MAINTENANCE, AssetStatus.LOST, AssetStatus.RETIRED, AssetStatus.DISPOSED],
+    AssetStatus.OVERDUE: [AssetStatus.AVAILABLE, AssetStatus.MAINTENANCE, AssetStatus.LOST, AssetStatus.RETIRED, AssetStatus.DISPOSED],
+    AssetStatus.RETURNED: [AssetStatus.AVAILABLE, AssetStatus.ASSIGNED, AssetStatus.MAINTENANCE, AssetStatus.RETIRED, AssetStatus.DISPOSED, AssetStatus.LOST],
+    AssetStatus.DAMAGED: [AssetStatus.MAINTENANCE, AssetStatus.AVAILABLE, AssetStatus.RETIRED, AssetStatus.DISPOSED, AssetStatus.LOST],
 }
 
-
-# Terminal (final) states - cannot change from these
 TERMINAL_STATUSES = {
-    AssetStatus.RETIRED,
     AssetStatus.DISPOSED,
 }
 
-# Active states - asset is being actively used
 ACTIVE_STATUSES = {
     AssetStatus.ASSIGNED,
     AssetStatus.IN_USE,
 }
 
-# Available states - can be assigned
 AVAILABLE_STATUSES = {
-    AssetStatus.READY,
     AssetStatus.AVAILABLE,
-    AssetStatus.IN_STOCK,
-    AssetStatus.RETURNED,
     AssetStatus.FOUND,
+    AssetStatus.RETURNED,
+    AssetStatus.READY,
+    AssetStatus.IN_STOCK,
 }
 
 # Problematic states - need action

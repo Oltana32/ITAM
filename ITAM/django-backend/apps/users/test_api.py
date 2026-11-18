@@ -63,6 +63,32 @@ class TestUserAPI(APITestCase):
         assert response.status_code == status.HTTP_200_OK
         assert response.data["username"] == "testuser"
 
+    def test_create_user_generates_email_from_first_name(self):
+        """New users should get an awashwine email derived from their first name."""
+        admin = User.objects.create_user(
+            username="adminuser",
+            email="admin@example.com",
+            password="adminpass123",
+            role="admin",
+        )
+        self.client.force_authenticate(user=admin)
+
+        response = self.client.post(
+            "/api/users/",
+            {
+                "first_name": "Alice",
+                "last_name": "Bekele",
+                "password": "Password123!",
+                "role": "it_team",
+                "department": "IT",
+            },
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.data["email"] == "alice@awashwine.com"
+        assert User.objects.filter(email="alice@awashwine.com").exists()
+
     def test_create_user_unauthorized(self):
         """Test creating a user without authentication."""
         client = APIClient()

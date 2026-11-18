@@ -4,6 +4,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button';
 import { Camera, X, ScanLine } from 'lucide-react';
 
+function isLocalSecureContext(): boolean {
+  if (typeof window === 'undefined') return true;
+  const host = window.location.hostname;
+  return window.isSecureContext || host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
+}
+
 interface QrScannerDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -31,9 +37,16 @@ export function QrScannerDialog({ open, onOpenChange, onScan, onVerify, continuo
   const [locationCorrect, setLocationCorrect] = useState(true);
   const [currentCondition, setCurrentCondition] = useState('excellent');
   const [notes, setNotes] = useState('');
+  const [manualTag, setManualTag] = useState('');
 
   useEffect(() => {
     if (!open) return;
+
+    if (!isLocalSecureContext()) {
+      setError('Camera access is blocked on this host. Use localhost or HTTPS, or type the asset tag manually below.');
+      setScanning(false);
+      return;
+    }
 
     const startScanner = async () => {
       setError(null);
@@ -91,6 +104,23 @@ export function QrScannerDialog({ open, onOpenChange, onScan, onVerify, continuo
     onOpenChange(false);
   };
 
+  const submitManualTag = () => {
+    const trimmed = manualTag.trim();
+    if (!trimmed) return;
+
+    if (onVerify) {
+      setPendingCode(trimmed);
+      setShowReview(true);
+      return;
+    }
+
+    if (onScan) onScan(trimmed);
+    if (!continuous) {
+      onOpenChange(false);
+    }
+    setManualTag('');
+  };
+
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-md p-0 overflow-hidden">
@@ -130,6 +160,29 @@ export function QrScannerDialog({ open, onOpenChange, onScan, onVerify, continuo
                 <p className="text-sm text-muted-foreground">{error}</p>
                 <Button variant="outline" size="sm" onClick={handleClose}>
                   Close
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {!showReview && (
+            <div className="mt-4 space-y-2">
+              <label className="text-xs font-medium text-muted-foreground">Or enter an asset tag manually</label>
+              <div className="flex gap-2">
+                <input
+                  value={manualTag}
+                  onChange={(e) => setManualTag(e.target.value)}
+                  placeholder="AW-LAP-0001"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      submitManualTag();
+                    }
+                  }}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                />
+                <Button type="button" variant="secondary" size="sm" disabled={!manualTag.trim()} onClick={submitManualTag}>
+                  Use tag
                 </Button>
               </div>
             </div>

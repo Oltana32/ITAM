@@ -1,8 +1,12 @@
 # django-backend/apps/assets/models.py
 
+from decimal import Decimal
+
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.db import models
 from django.core.exceptions import ValidationError
+from django.utils import timezone
 from apps.core.constants import AssetStatus
 from apps.assets.validators import validate_status_transition
 from apps.assets.tag_generator import generate_asset_tag
@@ -73,6 +77,13 @@ class Asset(models.Model):
         null=True, 
         blank=True,
         help_text="Original purchase cost in company currency"
+    )
+    last_active_purchase_cost = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Last active purchase value before the asset was retired or marked lost."
     )
     warranty_expiry = models.DateField(null=True, blank=True)
     
@@ -160,10 +171,59 @@ class Asset(models.Model):
                 self.tag = generate_asset_tag(self.category)
             else:
                 raise ValidationError("Asset tag cannot be empty for existing assets.")
-        
+
+        if self.status in {AssetStatus.RETIRED, AssetStatus.DISPOSED, AssetStatus.LOST}:
+            if self.last_active_purchase_cost is None and self.purchase_cost not in (None, Decimal("0.00")):
+                self.last_active_purchase_cost = self.purchase_cost
+            self.purchase_cost = Decimal("0.00")
+            self.condition = AssetCondition.POOR
+        elif self.status in {AssetStatus.AVAILABLE, AssetStatus.ASSIGNED, AssetStatus.MAINTENANCE}:
+            if self.last_active_purchase_cost is not None and self.purchase_cost in (None, Decimal("0.00")):
+                self.purchase_cost = self.last_active_purchase_cost
+            elif self.purchase_cost is not None and self.last_active_purchase_cost is None:
+                self.last_active_purchase_cost = self.purchase_cost
+
+        if self.status == AssetStatus.FOUND and self.purchase_cost in (None, Decimal("0.00")):
+            self.purchase_cost = Decimal("0.00")
+
         self.clean()
+        reason = getattr(self, "_pending_maintenance_reason", "")
+        changed_by = self.updated_by
         super().save(*args, **kwargs)
-    
+
+        if self.status == AssetStatus.MAINTENANCE:
+            self._ensure_maintenance_work_order(changed_by=changed_by, reason=reason)
+        self._pending_maintenance_reason = ""
+
+    def _ensure_maintenance_work_order(self, changed_by=None, reason: str = "") -> None:
+        """Create a preventive maintenance record when an asset is placed under maintenance."""
+        from apps.maintenance.models import MaintenanceRecord, MaintenanceStatus, MaintenanceType
+        from apps.users.models import UserRole
+
+        open_record_exists = MaintenanceRecord.objects.filter(
+            asset_id=self.pk,
+            status__in=[MaintenanceStatus.SCHEDULED, MaintenanceStatus.IN_PROGRESS],
+        ).exists()
+        if open_record_exists:
+            return
+
+        User = get_user_model()
+        technician = (
+            User.objects.filter(role=UserRole.IT_TEAM).order_by("id").first()
+            or User.objects.filter(is_active=True).order_by("id").first()
+            or changed_by
+        )
+
+        MaintenanceRecord.objects.create(
+            asset=self,
+            type=MaintenanceType.PREVENTIVE,
+            schedule_date=timezone.now().date(),
+            status=MaintenanceStatus.IN_PROGRESS,
+            technician=technician,
+            description=(reason or f"Asset marked under maintenance by {changed_by or 'system'}"),
+            cost=0.00,
+        )
+
     def change_status(self, new_status: str, changed_by=None, reason: str = "") -> None:
         """
         Change asset status with validation and history tracking.
@@ -179,7 +239,9 @@ class Asset(models.Model):
         old_status = self.status
         self.status = new_status
         self.updated_by = changed_by
+        self._pending_maintenance_reason = reason
         self.save()
+        self._pending_maintenance_reason = ""
         
         from apps.assets.history import log_status_change
 

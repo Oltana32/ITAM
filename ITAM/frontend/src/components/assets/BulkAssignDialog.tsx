@@ -47,9 +47,32 @@ export function BulkAssignDialog({ open, onOpenChange, selectedAssets, onAssignC
     });
   };
 
+  const isPersonnelAsset = (asset: Asset) => {
+    const category = String(asset.category || '').toLowerCase();
+    const name = String(asset.name || '').toLowerCase();
+    return (
+      category === 'laptop' ||
+      category === 'desktop' ||
+      category === 'monitor' ||
+      category === 'phone' ||
+      category === 'tablet' ||
+      name.includes('laptop') ||
+      name.includes('desktop') ||
+      name.includes('monitor') ||
+      name.includes('phone') ||
+      name.includes('tablet')
+    );
+  };
+
+  const requiresPersonnelMeta = selectedAssets.some(isPersonnelAsset);
+
   const handleAssign = async () => {
-    if (!formData.assigned_to_name || !formData.employee_id) {
-      toast.error('Please fill in Name and Employee ID');
+    if (!formData.assigned_to_name) {
+      toast.error('Please fill in Name');
+      return;
+    }
+    if (requiresPersonnelMeta && !formData.employee_id) {
+      toast.error('Please fill in Employee ID');
       return;
     }
     // If single asset selected, create a regular assignment using assignments API
@@ -60,6 +83,7 @@ export function BulkAssignDialog({ open, onOpenChange, selectedAssets, onAssignC
         const today = new Date();
         const assigned_date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
         const locationLabel = formData.location || (locations.find(l => l.id === asset.location)?.name || asset.location || 'Unassigned');
+        const assignmentEmployeeId = requiresPersonnelMeta ? formData.employee_id : 'N/A';
 
         await createAssignment({
           asset: Number(asset.id),
@@ -67,9 +91,8 @@ export function BulkAssignDialog({ open, onOpenChange, selectedAssets, onAssignC
           status: 'assigned',
           notes: `Assigned ${asset.name} via Assets page`,
           assignedTo: formData.assigned_to_name,
-          employeeId: formData.employee_id,
+          employeeId: assignmentEmployeeId,
           department: formData.department,
-          
           location: locationLabel,
           expectedReturnDate: formData.expected_return_date || null,
         });
@@ -91,9 +114,8 @@ export function BulkAssignDialog({ open, onOpenChange, selectedAssets, onAssignC
       const payload = {
         asset_ids: selectedAssets.map(a => parseInt(a.id)),
         assigned_to_name: formData.assigned_to_name,
-        employee_id: formData.employee_id,
+        employee_id: requiresPersonnelMeta ? formData.employee_id : 'N/A',
         department: formData.department,
-        
         location: formData.location,
         expected_return_date: formData.expected_return_date || null,
       };
@@ -213,16 +235,18 @@ export function BulkAssignDialog({ open, onOpenChange, selectedAssets, onAssignC
                 />
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="position">Position</Label>
-                <Input
-                  id="position"
-                  name="position"
-                  placeholder="e.g. System Administrator"
-                  value={formData.position}
-                  onChange={handleChange}
-                />
-              </div>
+              {requiresPersonnelMeta && (
+                <div className="space-y-2">
+                  <Label htmlFor="position">Position</Label>
+                  <Input
+                    id="position"
+                    name="position"
+                    placeholder="e.g. System Administrator"
+                    value={formData.position}
+                    onChange={handleChange}
+                  />
+                </div>
+              )}
 
 
               {selectedAssets.length === 1 ? (
@@ -257,16 +281,18 @@ export function BulkAssignDialog({ open, onOpenChange, selectedAssets, onAssignC
                 </div>
               )}
 
-              <div className="space-y-2">
-                <Label htmlFor="employee_id">Employee ID</Label>
-                <Input
-                  id="employee_id"
-                  name="employee_id"
-                  placeholder="e.g., E-1023"
-                  value={formData.employee_id}
-                  onChange={handleChange}
-                />
-              </div>
+              {requiresPersonnelMeta && (
+                <div className="space-y-2">
+                  <Label htmlFor="employee_id">Employee ID</Label>
+                  <Input
+                    id="employee_id"
+                    name="employee_id"
+                    placeholder="e.g., E-1023"
+                    value={formData.employee_id}
+                    onChange={handleChange}
+                  />
+                </div>
+              )}
 
               <div className="space-y-2">
                 <Label htmlFor="expected_return_date">Given Date</Label>
@@ -327,7 +353,7 @@ export function BulkAssignDialog({ open, onOpenChange, selectedAssets, onAssignC
           {!assignResult ? (
             <>
               <Button variant="outline" onClick={handleClose}>Cancel</Button>
-              <Button onClick={handleAssign} disabled={!formData.assigned_to_name || !formData.employee_id || isAssigning || isCreatingAssignment}>
+              <Button onClick={handleAssign} disabled={!formData.assigned_to_name || (requiresPersonnelMeta && !formData.employee_id) || isAssigning || isCreatingAssignment}>
                 {(isAssigning || isCreatingAssignment) ? 'Saving…' : (selectedAssets.length === 1 ? 'Save & Print Agreement' : 'Assign')}
               </Button>
             </>

@@ -24,17 +24,65 @@ const typeConfig: Record<string, { icon: React.ElementType; color: string }> = {
   success: { icon: CheckCircle, color: 'text-[hsl(var(--status-active))]' },
 };
 
+function readAlertSettings() {
+  if (typeof window === 'undefined') {
+    return {
+      warrantyAlerts: true,
+      alertDays: '30',
+      licenseAlerts: true,
+      maintenanceReminders: true,
+      auditOverdueAlerts: true,
+      lowStockWarnings: false,
+    };
+  }
+
+  try {
+    return { ...{
+      warrantyAlerts: true,
+      alertDays: '30',
+      licenseAlerts: true,
+      maintenanceReminders: true,
+      auditOverdueAlerts: true,
+      lowStockWarnings: false,
+    }, ...JSON.parse(window.localStorage.getItem('itam_settings') ?? '{}') };
+  } catch {
+    return {
+      warrantyAlerts: true,
+      alertDays: '30',
+      licenseAlerts: true,
+      maintenanceReminders: true,
+      auditOverdueAlerts: true,
+      lowStockWarnings: false,
+    };
+  }
+}
+
+function isNotificationEnabled(notificationType: string, settings: ReturnType<typeof readAlertSettings>) {
+  if (notificationType.startsWith('maintenance_')) return settings.maintenanceReminders !== false;
+  if (notificationType === 'license_expiry') return settings.licenseAlerts !== false;
+  if (['asset_assigned', 'asset_returned', 'asset_retired', 'asset_disposed'].includes(notificationType)) return settings.warrantyAlerts !== false;
+  if (notificationType === 'audit_overdue') return settings.auditOverdueAlerts !== false;
+  if (notificationType === 'low_stock') return settings.lowStockWarnings === true;
+  return true;
+}
+
 export default function Notifications() {
   const [typeFilter, setTypeFilter] = useState('all');
   const { notifications, loading, markAllRead, clearAll, markRead, deleteNotification } = useNotifications();
+  const settings = readAlertSettings();
 
   const filtered = useMemo(
-    () => notifications.filter((n) => typeFilter === 'all' || n.notification_type === typeFilter),
-    [notifications, typeFilter]
+    () => notifications.filter((n) => {
+      if (!isNotificationEnabled(n.notification_type, settings)) {
+        return false;
+      }
+      return typeFilter === 'all' || n.notification_type === typeFilter;
+    }),
+    [notifications, settings, typeFilter]
   );
   const unread = useMemo(
-    () => notifications.filter((n) => !n.read_status).length,
-    [notifications]
+    () => filtered.filter((n) => !n.read_status).length,
+    [filtered]
   );
 
   return (
@@ -66,10 +114,10 @@ export default function Notifications() {
         {/* Summary Cards */}
         <div className="grid gap-4 md:grid-cols-4 animate-fade-in-up">
           {[
-            { label: 'Total', count: notifications.length, color: 'bg-primary/10 text-primary' },
-            { label: 'Maintenance', count: notifications.filter(n => n.notification_type.includes('maintenance')).length, color: 'bg-[hsl(var(--chart-3))]/10 text-[hsl(var(--chart-3))]' },
+            { label: 'Total', count: filtered.length, color: 'bg-primary/10 text-primary' },
+            { label: 'Maintenance', count: filtered.filter(n => n.notification_type.includes('maintenance')).length, color: 'bg-[hsl(var(--chart-3))]/10 text-[hsl(var(--chart-3))]' },
             { label: 'Unread', count: unread, color: 'bg-destructive/10 text-destructive' },
-            { label: 'Licenses', count: notifications.filter(n => n.notification_type === 'license_expiry').length, color: 'bg-[hsl(var(--status-active))]/10 text-[hsl(var(--status-active))]' },
+            { label: 'Licenses', count: filtered.filter(n => n.notification_type === 'license_expiry').length, color: 'bg-[hsl(var(--status-active))]/10 text-[hsl(var(--status-active))]' },
           ].map(s => (
             <Card key={s.label} className="card-hover">
               <CardContent className="pt-5 flex items-center gap-3">
